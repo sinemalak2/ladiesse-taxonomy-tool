@@ -16,14 +16,18 @@ explicitly publish them back as metafields.
 
 ## 1. Create a Shopify custom app
 
-In the Shopify admin: **Settings → Apps and sales channels → Develop apps →
-Create an app**. Scope it to:
+Custom apps are now created in Shopify's **Dev Dashboard** (Settings → Apps
+→ "Build apps in Dev Dashboard" from the Shopify admin), not the old
+in-admin flow. Create an app, request the `read_products` scope (add
+`write_products` too if you want the "Publish to Shopify" metafield
+write-back feature), and release the version.
 
-- `read_products` (required)
-- `write_products` (only needed for the "Publish to Shopify" metafield
-  write-back feature)
-
-Install the app, then generate an **Admin API access token**.
+Dev Dashboard apps don't expose a static Admin API token in the UI anymore
+— instead you get a **Client ID** and **Client Secret** (under the app's
+Settings → Credentials), which this app exchanges for a short-lived (24h)
+access token itself via the OAuth client credentials grant (see
+`lib/shopifyAuth.js`). Just copy those two values, no install/token-reveal
+step needed.
 
 ## 2. Create a Neon Postgres project
 
@@ -44,7 +48,8 @@ Fill in:
 |---|---|
 | `DATABASE_URL` | Neon pooled connection string |
 | `SHOPIFY_STORE_DOMAIN` | e.g. `your-store.myshopify.com` |
-| `SHOPIFY_ADMIN_API_TOKEN` | Step 1 |
+| `SHOPIFY_CLIENT_ID` | Step 1 — Dev Dashboard app's Credentials panel |
+| `SHOPIFY_CLIENT_SECRET` | Step 1 — same panel, click reveal |
 | `SHOPIFY_API_VERSION` | `2025-01` (or current) |
 | `CRON_SECRET` | any random string — protects `/api/sync` from being triggered by a plain public `GET` |
 

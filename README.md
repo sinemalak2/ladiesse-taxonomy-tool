@@ -67,15 +67,23 @@ to pull the current Shopify catalog into `products` and seed empty
 
 ## 5. Deploy
 
-```bash
-vercel deploy --prod
-```
+Code is on GitHub at `sinemalak2/ladiesse-taxonomy-tool` (private). Deploy
+by importing it in the [Vercel dashboard](https://vercel.com/new):
 
-Add the same env vars in the Vercel project's dashboard. After the first
-deploy, go to **Project Settings → Deployment Protection** and turn on
-Standard (or Password) Protection — this is what keeps the tool private to
-you and Ipek. Vercel Cron requests bypass Deployment Protection
-automatically, so the scheduled sync below still runs.
+1. **Add New → Project**, import `sinemalak2/ladiesse-taxonomy-tool`.
+2. Add the env vars from `.env.local` in the project's **Environment
+   Variables** settings, then deploy.
+3. **Project Settings → Deployment Protection** — turn on Standard (or
+   Password) Protection. This is what keeps the tool private to you and
+   Ipek; there's no auth code in this repo, access control is entirely a
+   Vercel setting. Vercel Cron requests bypass Deployment Protection
+   automatically, so the scheduled sync below still runs.
+4. **Project Settings → Domains** — add `taxonomy.ladiesse.com`. Vercel
+   will show you a CNAME target (e.g. `cname.vercel-dns.com`) to add wherever
+   `ladiesse.com`'s DNS is managed (Shopify's domain settings, or your
+   registrar if it's managed elsewhere) as a record for the `taxonomy`
+   subdomain. Vercel issues SSL for it automatically once the DNS record
+   resolves.
 
 `vercel.json` schedules `/api/sync` every 30 minutes via Vercel Cron. Note:
 Vercel's Hobby plan has at times restricted cron frequency — if the

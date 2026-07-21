@@ -19,9 +19,16 @@ export async function GET(request) {
   );
   const total = countRows[0].total;
 
+  // Catalog-wide count, independent of the current search/page — the bulk
+  // delete button needs to reflect everything marked, not just this page.
+  const { rows: markedRows } = await query(
+    'SELECT COUNT(*)::int AS count FROM products WHERE marked_for_removal = true'
+  );
+  const markedCount = markedRows[0].count;
+
   const { rows } = await query(
     `SELECT
-       p.id, p.title, p.handle, p.image_url, p.price, p.status, p.synced_at,
+       p.id, p.title, p.handle, p.image_url, p.price, p.status, p.synced_at, p.marked_for_removal,
        COUNT(pt.category_key) FILTER (WHERE array_length(pt.values, 1) > 0)::int AS tagged_count,
        (SELECT COUNT(*)::int FROM tag_categories) AS total_categories
      FROM products p
@@ -39,5 +46,6 @@ export async function GET(request) {
     pageSize: PAGE_SIZE,
     total,
     totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    markedCount,
   });
 }

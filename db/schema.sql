@@ -7,8 +7,13 @@ CREATE TABLE IF NOT EXISTS products (
   price NUMERIC,
   status TEXT,                       -- active/draft/archived from Shopify
   raw_shopify_data JSONB,            -- full payload for anything we didn't model
-  synced_at TIMESTAMPTZ DEFAULT now()
+  synced_at TIMESTAMPTZ DEFAULT now(),
+  marked_for_removal BOOLEAN NOT NULL DEFAULT false
 );
+
+-- ADD COLUMN IF NOT EXISTS so this is safe to re-run against a database that
+-- already has the products table from before this column existed.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS marked_for_removal BOOLEAN NOT NULL DEFAULT false;
 
 -- Category config (so new taxonomy values can be added without a migration)
 CREATE TABLE IF NOT EXISTS tag_categories (

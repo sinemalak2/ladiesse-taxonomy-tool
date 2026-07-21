@@ -5,7 +5,7 @@ export async function GET(request, { params }) {
   const { id } = await params;
 
   const { rows: productRows } = await query(
-    'SELECT id, title, handle, image_url, price, status, synced_at FROM products WHERE id = $1',
+    'SELECT id, title, handle, image_url, price, status, synced_at, marked_for_removal FROM products WHERE id = $1',
     [id]
   );
 

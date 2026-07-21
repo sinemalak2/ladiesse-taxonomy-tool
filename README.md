@@ -110,6 +110,9 @@ POST /api/categories/:key/values                     { value }  — append a new
 POST /api/sync                                        manual sync trigger
 GET  /api/sync                                        cron-triggered sync (requires CRON_SECRET)
 POST /api/products/:id/publish-to-shopify             write assigned tags to Shopify metafields
+POST /api/products/:id/mark-removal                   { marked }  — flag/unflag for later bulk deletion
+POST /api/products/:id/delete                         delete immediately, from Shopify and this DB
+POST /api/products/bulk-delete                        delete every product currently marked_for_removal
 ```
 
 ## Publishing tags to Shopify
@@ -120,6 +123,26 @@ category as a `list.single_line_text_field` metafield under the
 `skin_tone`), so the storefront/AI search layer can read tags without
 querying this Postgres database directly. This is one-way (DB → Shopify),
 triggered manually per product from the tagging UI.
+
+## Removing products
+
+Two ways to remove a product, both in the tagging UI (`lib/productRemoval.js`):
+
+- **Delete now** — the product detail panel's "Delete from Shopify now"
+  button calls Shopify's `productDelete` mutation immediately, then removes
+  the row locally (tags/notes cascade automatically). Confirmed via a plain
+  browser dialog before it fires. This is real, essentially irreversible
+  deletion — there's no undo once Shopify's mutation succeeds.
+- **Mark, then bulk delete** — "Mark for removal" (in the list or the detail
+  panel) only flips a local flag; marked rows show greyed-out/struck-through
+  in the list so they're easy to review. The sidebar's "Delete N marked from
+  Shopify" button (visible whenever the count is > 0, across the whole
+  catalog regardless of current search/page) deletes all of them in one
+  batch, confirmed once up front. One product's Shopify failure doesn't
+  abort the rest of the batch — check server logs for any that failed.
+
+Requires the Shopify custom app's `write_products` scope (already needed for
+metafield publishing above, so no extra Shopify setup if that already works).
 
 ## Stage 2: user affinity vectors (GA4 pipeline)
 

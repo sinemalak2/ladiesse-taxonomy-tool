@@ -53,6 +53,10 @@ export default function Home() {
               categories={categories}
               onCategoryValueAdded={handleCategoryValueAdded}
               onTagsChanged={() => setRefreshKey((k) => k + 1)}
+              onDeleted={() => {
+                setSelectedId(null);
+                setRefreshKey((k) => k + 1);
+              }}
             />
           </>
         ) : (

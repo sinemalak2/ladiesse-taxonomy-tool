@@ -6,6 +6,7 @@
   --color-mid: #88888f;
   --color-soft: #bebec8;
   --color-rule: #e6e6ee;
+  --color-danger: #b3261e;
 
   --w-thin: 200;
   --w-light: 300;
@@ -155,6 +156,42 @@ textarea {
   border-color: var(--color-mid);
 }
 
+.btn-danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.btn-danger:hover {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-white);
+}
+
+.mark-toggle {
+  background: none;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--btn-radius);
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: var(--w-light);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  color: var(--color-mid);
+  flex-shrink: 0;
+}
+
+.mark-toggle:hover {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.mark-toggle.marked {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: var(--color-white);
+}
+
 .product-list {
   display: flex;
   flex-direction: column;
@@ -183,6 +220,14 @@ textarea {
 .product-row.selected {
   border-color: var(--color-black);
   background: var(--color-white);
+}
+
+.product-row.marked {
+  opacity: 0.5;
+}
+
+.product-row.marked .meta .title {
+  text-decoration: line-through;
 }
 
 .product-row img {

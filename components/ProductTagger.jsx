@@ -5,7 +5,7 @@ import TaggedByToggle from './TaggedByToggle.jsx';
 import NotesField from './NotesField.jsx';
 import { toggleTagValue } from '../lib/tagLogic.js';
 
-export default function ProductTagger({ productId, categories, onCategoryValueAdded, onTagsChanged }) {
+export default function ProductTagger({ productId, categories, onCategoryValueAdded, onTagsChanged, onDeleted }) {
   // Shopify GIDs (e.g. gid://shopify/Product/123) contain literal "/" —
   // must be encoded or Next.js splits them across route segments.
   const encodedId = encodeURIComponent(productId);
@@ -16,6 +16,8 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
   const [taggedBy, setTaggedBy] = useState('Ipek');
   const [publishStatus, setPublishStatus] = useState('');
   const [newValueDrafts, setNewValueDrafts] = useState({});
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +82,34 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
     const res = await fetch(`/api/products/${encodedId}/publish-to-shopify`, { method: 'POST' });
     const json = await res.json();
     setPublishStatus(res.ok ? 'Published to Shopify.' : json.error);
+  }
+
+  async function handleToggleMark() {
+    const marked = !product.marked_for_removal;
+    setProduct((prev) => ({ ...prev, marked_for_removal: marked }));
+    await fetch(`/api/products/${encodedId}/mark-removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marked }),
+    });
+    onTagsChanged?.(); // reuses the existing refresh hook so the list picks up the badge
+  }
+
+  async function handleDelete() {
+    const ok = window.confirm(`Delete "${product.title}" from Shopify? This cannot be undone.`);
+    if (!ok) return;
+
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      const res = await fetch(`/api/products/${encodedId}/delete`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Delete failed');
+      onDeleted?.();
+    } catch (err) {
+      setDeleteError(err.message);
+      setDeleting(false);
+    }
   }
 
   if (loading) return <div className="status-text">Loading product...</div>;
@@ -151,6 +181,20 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
         </button>
         {publishStatus && <div className="status-text">{publishStatus}</div>}
       </div>
+
+      <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          className={`mark-toggle${product.marked_for_removal ? ' marked' : ''}`}
+          onClick={handleToggleMark}
+        >
+          {product.marked_for_removal ? 'Unmark for removal' : 'Mark for removal'}
+        </button>
+        <button type="button" className="btn btn-danger" onClick={handleDelete} disabled={deleting}>
+          {deleting ? 'Deleting...' : 'Delete from Shopify now'}
+        </button>
+      </div>
+      {deleteError && <div className="status-text">{deleteError}</div>}
     </div>
   );
 }

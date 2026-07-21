@@ -1,14 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export default function ProductList({ selectedId, onSelect, refreshKey, onSynced }) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [data, setData] = useState({ products: [], totalPages: 1, total: 0 });
+  const [data, setData] = useState({ products: [], totalPages: 1, total: 0, markedCount: 0 });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const fetchProducts = useCallback(() => {
+    setLoading(true);
+    const params = new URLSearchParams({ page: String(page) });
+    if (search.trim()) params.set('search', search.trim());
+
+    return fetch(`/api/products?${params.toString()}`)
+      .then((res) => res.json())
+      .then((json) => setData(json))
+      .finally(() => setLoading(false));
+  }, [search, page]);
 
   useEffect(() => {
     setPage(1);
@@ -16,23 +28,13 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    const params = new URLSearchParams({ page: String(page) });
-    if (search.trim()) params.set('search', search.trim());
-
-    fetch(`/api/products?${params.toString()}`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (!cancelled) setData(json);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
+    fetchProducts().then(() => {
+      if (cancelled) return;
+    });
     return () => {
       cancelled = true;
     };
-  }, [search, page, refreshKey]);
+  }, [fetchProducts, refreshKey]);
 
   async function handleSync() {
     setSyncing(true);
@@ -50,6 +52,54 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
     }
   }
 
+  async function handleToggleMark(e, product) {
+    e.stopPropagation();
+    const marked = !product.marked_for_removal;
+    setData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === product.id ? { ...p, marked_for_removal: marked } : p)),
+      markedCount: prev.markedCount + (marked ? 1 : -1),
+    }));
+    await fetch(`/api/products/${encodeURIComponent(product.id)}/mark-removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marked }),
+    });
+  }
+
+  async function handleBulkDelete() {
+    const count = data.markedCount ?? 0;
+    if (count === 0) return;
+    const ok = window.confirm(
+      `Delete ${count} product${count === 1 ? '' : 's'} marked for removal from Shopify? This cannot be undone.`
+    );
+    if (!ok) return;
+
+    setBulkDeleting(true);
+    setSyncMessage('');
+    try {
+      const res = await fetch('/api/products/bulk-delete', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Bulk delete failed');
+      const failedNote = json.failed.length > 0 ? ` (${json.failed.length} failed — see logs)` : '';
+      setSyncMessage(`Deleted ${json.succeeded} of ${json.total} marked product(s).${failedNote}`);
+
+      const selectedProduct = data.products.find((p) => p.id === selectedId);
+      const selectedWasMarked = selectedProduct?.marked_for_removal;
+      const selectedStillFailed = json.failed.some((f) => f.id === selectedId);
+      if (selectedWasMarked && !selectedStillFailed) {
+        onSelect(null);
+      }
+      await fetchProducts();
+    } catch (err) {
+      setSyncMessage(err.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  const markedCount = data.markedCount ?? 0;
+
   return (
     <div>
       <div className="toolbar">
@@ -63,6 +113,13 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
           {syncing ? 'Syncing...' : 'Sync now'}
         </button>
       </div>
+      {markedCount > 0 && (
+        <div className="toolbar">
+          <button className="btn btn-danger" onClick={handleBulkDelete} disabled={bulkDeleting} style={{ width: '100%' }}>
+            {bulkDeleting ? 'Deleting...' : `Delete ${markedCount} marked from Shopify`}
+          </button>
+        </div>
+      )}
       {syncMessage && <div className="status-text">{syncMessage}</div>}
 
       <div className="product-list">
@@ -71,7 +128,7 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
         {data.products.map((p) => (
           <div
             key={p.id}
-            className={`product-row${p.id === selectedId ? ' selected' : ''}`}
+            className={`product-row${p.id === selectedId ? ' selected' : ''}${p.marked_for_removal ? ' marked' : ''}`}
             onClick={() => onSelect(p.id)}
           >
             {p.image_url ? <img src={p.image_url} alt="" /> : <div className="product-row-placeholder" style={{ width: 40, height: 52, background: 'var(--color-line)' }} />}
@@ -84,6 +141,14 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
             <div className="tag-progress">
               {p.tagged_count}/{p.total_categories}
             </div>
+            <button
+              type="button"
+              className={`mark-toggle${p.marked_for_removal ? ' marked' : ''}`}
+              onClick={(e) => handleToggleMark(e, p)}
+              title={p.marked_for_removal ? 'Unmark for removal' : 'Mark for removal'}
+            >
+              {p.marked_for_removal ? 'Marked' : 'Mark'}
+            </button>
           </div>
         ))}
       </div>

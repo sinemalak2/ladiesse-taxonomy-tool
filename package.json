@@ -10,7 +10,9 @@
     "start": "next start",
     "test": "node --test",
     "migrate": "node scripts/migrate.js",
-    "sync": "node scripts/sync-shopify.js"
+    "sync": "node scripts/sync-shopify.js",
+    "prune-removed": "node scripts/prune-removed-products.js",
+    "prune-archived": "node scripts/prune-archived-products.js"
   },
   "dependencies": {
     "next": "^15.1.0",

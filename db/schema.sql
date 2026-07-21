@@ -38,13 +38,13 @@ CREATE TABLE IF NOT EXISTS product_notes (
 );
 
 INSERT INTO tag_categories (key, label, sub_label, is_multi, max_tags, values) VALUES
-('body_shape', 'Body Shape', 'Vücut Tipi', true, null,
-  ARRAY['Triangle (Üçgen)','Hourglass (Kum Saati)','Circle / Apple (Daire)','Pear (Armut)','Rectangle (Dikdörtgen)']),
-('occasion', 'Occasion', 'Venue birleştirildi', true, null,
-  ARRAY['Wedding','Brunch','Work','Casual','Gym / Activity','Seaside / Beach','Party','Coachella / Festival','Date','Travel (Tatil)','Everyday']),
+('body_shape', 'Body Shape', 'Body Type', true, null,
+  ARRAY['Triangle','Hourglass','Circle / Apple','Pear','Rectangle']),
+('occasion', 'Occasion', 'Venue merged in', true, null,
+  ARRAY['Wedding','Brunch','Work','Casual','Gym / Activity','Seaside / Beach','Party','Coachella / Festival','Date','Travel','Everyday']),
 ('vibe', 'Vibe', 'max 3 tags', true, 3,
   ARRAY['Romantic','Minimal','Bohemian','Edgy','Classic','Glam','Sporty','Whimsical','Sensual','Preppy']),
-('skin_tone', 'Flatters Skin Tone', 'Ten Rengi', true, null,
+('skin_tone', 'Flatters Skin Tone', 'Skin Tone', true, null,
   ARRAY['Fair / Light','Medium / Olive','Tan','Deep / Dark'])
 ON CONFLICT (key) DO NOTHING;
 

@@ -5,7 +5,7 @@ import { matchSearchQueryToValues, computeAffinityRows } from '../lib/affinity.j
 const TAG_CATEGORIES = [
   { key: 'occasion', values: ['Wedding', 'Brunch', 'Everyday'] },
   { key: 'vibe', values: ['Romantic', 'Bohemian', 'Minimal'] },
-  { key: 'body_shape', values: ['Circle / Apple (Daire)', 'Triangle (Üçgen)'] },
+  { key: 'body_shape', values: ['Circle / Apple (Rounded)', 'Triangle (3-Sided)'] },
 ];
 
 describe('matchSearchQueryToValues', () => {
@@ -27,7 +27,7 @@ describe('matchSearchQueryToValues', () => {
   test('matches against the primary (pre-paren) term only', () => {
     const matches = matchSearchQueryToValues('apple shape', TAG_CATEGORIES);
     assert.deepEqual(matches, [
-      { category_key: 'body_shape', attribute_value: 'Circle / Apple (Daire)' },
+      { category_key: 'body_shape', attribute_value: 'Circle / Apple (Rounded)' },
     ]);
   });
 

@@ -12,9 +12,12 @@
     "migrate": "node scripts/migrate.js",
     "sync": "node scripts/sync-shopify.js",
     "prune-removed": "node scripts/prune-removed-products.js",
-    "prune-archived": "node scripts/prune-archived-products.js"
+    "prune-archived": "node scripts/prune-archived-products.js",
+    "ingest-ga4": "node scripts/ingest-ga4.js",
+    "aggregate-affinity": "node scripts/aggregate-affinity.js"
   },
   "dependencies": {
+    "@google-cloud/bigquery": "^7.9.4",
     "next": "^15.1.0",
     "pg": "^8.13.1",
     "react": "^19.0.0",

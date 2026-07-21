@@ -121,6 +121,70 @@ category as a `list.single_line_text_field` metafield under the
 querying this Postgres database directly. This is one-way (DB → Shopify),
 triggered manually per product from the tagging UI.
 
+## Stage 2: user affinity vectors (GA4 pipeline)
+
+Nightly pipeline that turns GA4 behavior (views, searches, cart adds,
+purchases) into per-user affinity scores against the tag taxonomy above —
+feeds ranking in `ladiesse-ai-search.vercel.app`.
+
+**Verified against real ladiesse.com BigQuery export data (2026-07-21):**
+GA4's `items[].item_id` is Shopify's own format,
+`shopify_<COUNTRY>_<PRODUCT_ID>_<VARIANT_ID>` — not a bare GID — so
+`lib/ga4.js`'s `toProductGid()` parses the embedded product ID back into
+`gid://shopify/Product/...` to join against `products.id`. No theme change
+needed. `search_term` is confirmed as the right event param, but real
+queries are full natural-language ("I'm going to a party in Santa
+Barbara... interested in flowy dresses"), not short keywords — the simple
+substring/synonym matcher in `lib/affinity.js` catches literal overlaps
+(e.g. "party") but misses implied intent (e.g. "Ibiza" → beach). No GA4
+User-ID is set yet, so affinity tracks anonymous `user_pseudo_id` only for
+now — expected per Step 0's original spec, not a blocker.
+
+Also: `user_events.product_id` is **not** a foreign key to `products(id)`.
+GA4 retains events for products that later get archived and pruned (see
+`scripts/prune-archived-products.js`), so an FK would reject real historical
+events the moment their product is discontinued.
+
+1. GA4 Admin → Product Links → BigQuery Links → link a GCP project, **daily
+   export** (streaming/intraday not needed for a nightly job).
+2. Create a service account with BigQuery Data Viewer + Job User roles,
+   download its key, and set `GOOGLE_APPLICATION_CREDENTIALS`,
+   `GA4_BQ_PROJECT_ID`, `GA4_BQ_DATASET` (see `.env.local.example`).
+3. `npm run migrate` — creates `user_events` and `user_attribute_affinity`.
+4. `npm run ingest-ga4` — pulls the previous day's `events_YYYYMMDD` table
+   into `user_events`. Run manually once and inspect the table before
+   scheduling; safe to re-run (dedupes on `user_events_dedupe_idx`).
+5. `npm run aggregate-affinity` — joins `user_events` → `product_tags`
+   (plus keyword-matches `search` queries against `tag_categories.values`,
+   see `SEARCH_SYNONYMS` in `lib/affinity-config.js`), applies recency
+   decay, and rewrites `user_attribute_affinity` from the last 90 days of
+   events.
+6. `GET /api/users/:user_key/affinity` → `[{ category_key, attribute_value,
+   score }, ...]`, read-only. Returns `[]` below `COLD_START_MIN_EVENTS`
+   total events for that user, so the search backend falls back to pure
+   semantic match instead of ranking on a noisy vector. Called
+   server-to-server by `ladiesse-ai-search` — no browser session, so it's
+   gated by its own `AFFINITY_API_SECRET` bearer secret (see
+   `middleware.js`) rather than the login gate, the same way `/api/sync`
+   handles Vercel Cron.
+
+`vercel.json` schedules `GET /api/affinity-pipeline` nightly (4am, an hour
+after the Shopify sync) — it runs ingestion then aggregation in one request,
+reusing `CRON_SECRET`. They're combined into a single route/cron entry
+rather than two, since aggregation always has to run strictly after
+ingestion anyway, and Vercel's Hobby plan has historically capped the
+*number* of cron jobs, not just how often each one fires.
+
+Event weights, recency half-life, the aggregation window, and the cold-start
+threshold are constants in `lib/affinity-config.js`, not magic numbers
+buried in the aggregation logic.
+
+**Current data note:** as of this writing, 0 of the 1232 `product_tags`
+rows have any values yet — the stylist tagging tool hasn't been used on
+this catalog. View/cart/purchase events won't contribute affinity signal
+until products are actually tagged; only `search` keyword-matching produces
+scores today.
+
 ## Tests
 
 ```bash
@@ -128,5 +192,6 @@ npm test
 ```
 
 Pure logic (upsert classification, tag-cap validation, metafield
-construction, pagination) is extracted into `lib/` and tested with Node's
-built-in test runner, matching the convention used in `ladiesse-ai-search`.
+construction, pagination, affinity scoring/decay/keyword-matching) is
+extracted into `lib/` and tested with Node's built-in test runner, matching
+the convention used in `ladiesse-ai-search`.

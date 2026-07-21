@@ -1,0 +1,21 @@
+{
+  "name": "ladiesse-taxonomy-tool",
+  "version": "1.0.0",
+  "description": "Internal Shopify product tagging tool for Ladiesse's taste-graph taxonomy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --test",
+    "migrate": "node scripts/migrate.js",
+    "sync": "node scripts/sync-shopify.js"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "pg": "^8.13.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

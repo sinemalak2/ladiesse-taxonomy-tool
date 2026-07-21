@@ -37,6 +37,7 @@ export default function Home() {
             productId={selectedId}
             categories={categories}
             onCategoryValueAdded={handleCategoryValueAdded}
+            onTagsChanged={() => setRefreshKey((k) => k + 1)}
           />
         ) : (
           <div className="empty-state">Select a product to tag it</div>

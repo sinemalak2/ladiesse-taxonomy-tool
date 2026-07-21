@@ -13,7 +13,7 @@ export default function NotesField({ productId, initialNotes }) {
   async function save() {
     setSaving(true);
     try {
-      await fetch(`/api/products/${productId}/notes`, {
+      await fetch(`/api/products/${encodeURIComponent(productId)}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes }),

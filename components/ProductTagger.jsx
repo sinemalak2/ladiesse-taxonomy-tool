@@ -5,7 +5,10 @@ import TaggedByToggle from './TaggedByToggle.jsx';
 import NotesField from './NotesField.jsx';
 import { toggleTagValue } from '../lib/tagLogic.js';
 
-export default function ProductTagger({ productId, categories, onCategoryValueAdded }) {
+export default function ProductTagger({ productId, categories, onCategoryValueAdded, onTagsChanged }) {
+  // Shopify GIDs (e.g. gid://shopify/Product/123) contain literal "/" —
+  // must be encoded or Next.js splits them across route segments.
+  const encodedId = encodeURIComponent(productId);
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState(null);
   const [tagsByCategory, setTagsByCategory] = useState({});
@@ -19,7 +22,7 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
     setLoading(true);
     setPublishStatus('');
 
-    fetch(`/api/products/${productId}`)
+    fetch(`/api/products/${encodedId}`)
       .then((res) => res.json())
       .then((json) => {
         if (cancelled) return;
@@ -48,11 +51,12 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
 
     setTagsByCategory((prev) => ({ ...prev, [category.key]: next }));
 
-    await fetch(`/api/products/${productId}/tags`, {
+    await fetch(`/api/products/${encodedId}/tags`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category_key: category.key, values: next, tagged_by: taggedBy }),
     });
+    onTagsChanged?.();
   }
 
   async function handleAddValue(category) {
@@ -73,7 +77,7 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
 
   async function handlePublish() {
     setPublishStatus('Publishing...');
-    const res = await fetch(`/api/products/${productId}/publish-to-shopify`, { method: 'POST' });
+    const res = await fetch(`/api/products/${encodedId}/publish-to-shopify`, { method: 'POST' });
     const json = await res.json();
     setPublishStatus(res.ok ? 'Published to Shopify.' : json.error);
   }

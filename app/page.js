@@ -20,7 +20,7 @@ export default function Home() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${selectedId ? ' show-detail' : ''}`}>
       <div className="sidebar">
         <div className="sidebar-header">
           <div>
@@ -44,12 +44,17 @@ export default function Home() {
       </div>
       <div className="detail-panel">
         {selectedId && categories.length > 0 ? (
-          <ProductTagger
-            productId={selectedId}
-            categories={categories}
-            onCategoryValueAdded={handleCategoryValueAdded}
-            onTagsChanged={() => setRefreshKey((k) => k + 1)}
-          />
+          <>
+            <button type="button" className="back-button" onClick={() => setSelectedId(null)}>
+              ‹ Back to products
+            </button>
+            <ProductTagger
+              productId={selectedId}
+              categories={categories}
+              onCategoryValueAdded={handleCategoryValueAdded}
+              onTagsChanged={() => setRefreshKey((k) => k + 1)}
+            />
+          </>
         ) : (
           <div className="empty-state">Select a product to tag it</div>
         )}

@@ -90,11 +90,13 @@ by importing it in the [Vercel dashboard](https://vercel.com/new):
    subdomain. Vercel issues SSL for it automatically once the DNS record
    resolves.
 
-`vercel.json` schedules `/api/sync` every 30 minutes via Vercel Cron. Note:
-Vercel's Hobby plan has at times restricted cron frequency — if the
-scheduled runs don't fire as expected, check your plan's cron limits in the
-Vercel dashboard; an external pinger (e.g. cron-job.org hitting
-`/api/sync` with the `CRON_SECRET` bearer header) is a fallback.
+`vercel.json` schedules `/api/sync` once daily (3am) via Vercel Cron — the
+Hobby plan caps cron jobs at once per day, and a more frequent schedule
+fails deployment outright. The "Sync now" button in the UI still works
+anytime for on-demand syncs. To sync more often than daily, either upgrade
+to a Pro plan (which allows per-minute cron) and tighten the schedule in
+`vercel.json`, or use an external pinger (e.g. cron-job.org hitting
+`/api/sync` with the `CRON_SECRET` bearer header).
 
 ## API routes
 

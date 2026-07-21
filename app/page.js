@@ -22,8 +22,19 @@ export default function Home() {
   return (
     <div className="app-shell">
       <div className="sidebar">
-        <h1>Ladiesse Taxonomy</h1>
-        <div className="tagline">Product Tagging</div>
+        <div className="sidebar-header">
+          <div>
+            <h1>Ladiesse Taxonomy</h1>
+            <div className="tagline">Product Tagging</div>
+          </div>
+          <button
+            type="button"
+            className="logout-link"
+            onClick={() => fetch('/api/logout', { method: 'POST' }).then(() => (window.location.href = '/login'))}
+          >
+            Log out
+          </button>
+        </div>
         <ProductList
           selectedId={selectedId}
           onSelect={setSelectedId}

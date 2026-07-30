@@ -92,3 +92,91 @@ CREATE TABLE IF NOT EXISTS user_attribute_affinity (
   updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (user_key, category_key, attribute_value)
 );
+
+-- Brand onboarding: replaces the "Marka İletişim Bilgisi" Google Form as the
+-- source of truth for brand data (see utils/VendorSheet.js in
+-- ladiesse-market-place-orders for the sheet it's replacing). That repo
+-- cross-reads brands by id for order attribution — expose a read-only
+-- brands_public view (excluding tax_id/bank fields) for it rather than
+-- granting it direct table access.
+CREATE TABLE IF NOT EXISTS brands (
+  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- Identity / display
+  brand_name                TEXT NOT NULL,
+  slug                      TEXT UNIQUE NOT NULL,          -- for storefront URLs
+  category                  TEXT,                          -- e.g. 'ready-to-wear', 'accessories'
+  website_url               TEXT,
+  instagram_handle          TEXT,
+
+  -- Legal entity
+  legal_company_name        TEXT,                          -- Marka Şirket Ünvanı — collected at Stage 2
+  legal_address             TEXT,                          -- Marka Şirket Adresi — collected at Stage 2
+  tax_id                    TEXT,                          -- Vergi Kimlik No (VKN) — collected at Stage 2
+  tax_office                TEXT,                          -- Vergi Dairesi
+  trade_registry_no         TEXT,                          -- Ticaret Sicil No (optional)
+
+  -- Operations
+  warehouse_address         TEXT,                          -- Marka Depo Adresi — collected at Stage 4
+  avg_processing_days       SMALLINT DEFAULT 2,
+  shipping_carrier          TEXT,
+
+  -- Commercial terms
+  commission_percentage     NUMERIC(5,2) NOT NULL DEFAULT 40.00,
+  payout_frequency          TEXT NOT NULL DEFAULT 'monthly'
+                             CHECK (payout_frequency IN ('weekly','biweekly','monthly')),
+  contract_signed_date      DATE,
+  contract_url              TEXT,
+
+  -- Integration
+  shopify_oauth_status      TEXT NOT NULL DEFAULT 'not_connected'
+                             CHECK (shopify_oauth_status IN ('not_connected','connected','revoked')),
+  shopify_shop_domain       TEXT,
+  shopify_access_token_ref  TEXT,                          -- reference/id into secrets store, never raw token
+
+  -- Status & lifecycle
+  onboarding_status         TEXT NOT NULL DEFAULT 'pending'
+                             CHECK (onboarding_status IN
+                                ('pending','under_review','terms_set',
+                                 'integration_pending','active','paused',
+                                 'suspended','offboarded')),
+  live_at                   TIMESTAMPTZ,                   -- when catalogue went live
+  notes                     TEXT,                          -- internal notes
+
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One or more reps per brand (billing contact separate from primary, etc).
+CREATE TABLE IF NOT EXISTS brand_contacts (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_id        UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+
+  full_name       TEXT NOT NULL,              -- Marka Temsilci Adı Soyadı
+  phone_number    TEXT NOT NULL,              -- Marka Temsilci Telefon Numarası (incl. country code)
+  email           TEXT,
+  role            TEXT NOT NULL DEFAULT 'primary'
+                  CHECK (role IN ('primary','billing','operations','other')),
+  is_primary      BOOLEAN NOT NULL DEFAULT true,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_brand_contacts_brand_id ON brand_contacts(brand_id);
+
+-- Payout info, isolated from brands into its own table so it's not sitting
+-- in the same wide row as public-facing brand data (security/auditability).
+-- Collected at Stage 2; empty until then.
+CREATE TABLE IF NOT EXISTS brand_bank_accounts (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_id             UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+
+  account_holder_name  TEXT NOT NULL,
+  iban                 TEXT NOT NULL,
+  bank_name            TEXT,
+  is_active            BOOLEAN NOT NULL DEFAULT true,
+
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_brand_bank_accounts_brand_id ON brand_bank_accounts(brand_id);

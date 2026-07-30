@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import ProductList from '../components/ProductList.jsx';
 import ProductTagger from '../components/ProductTagger.jsx';
 
@@ -27,9 +26,6 @@ export default function Home() {
           <div>
             <h1>Ladiesse Taxonomy</h1>
             <div className="tagline">Product Tagging</div>
-            <Link href="/brands" className="logout-link">
-              Brands →
-            </Link>
           </div>
           <button
             type="button"

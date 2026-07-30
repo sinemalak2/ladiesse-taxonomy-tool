@@ -3,26 +3,55 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
+const ONBOARDING_STATUSES = [
+  'pending',
+  'under_review',
+  'terms_set',
+  'integration_pending',
+  'active',
+  'paused',
+  'suspended',
+  'offboarded',
+];
+
 function statusLabel(status) {
   return status.replace(/_/g, ' ');
 }
 
 export default function BrandsPage() {
   const [brands, setBrands] = useState(null);
+  const [showTaxonomyNav, setShowTaxonomyNav] = useState(true);
 
   useEffect(() => {
+    // brands.ladiesse.com is a dedicated domain for this section — the
+    // "back to taxonomy" link only makes sense when reached via
+    // taxonomy.ladiesse.com/brands.
+    setShowTaxonomyNav(!window.location.hostname.startsWith('brands.'));
+
     fetch('/api/brands')
       .then((res) => res.json())
       .then((json) => setBrands(json.brands));
   }, []);
 
+  function handleStatusChange(brandId, newStatus) {
+    setBrands((prev) => prev.map((b) => (b.id === brandId ? { ...b, onboarding_status: newStatus } : b)));
+
+    fetch(`/api/brands/${brandId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ onboarding_status: newStatus }),
+    }).catch(() => {});
+  }
+
   return (
     <div className="page-shell">
       <div className="page-header">
         <div>
-          <Link href="/" className="breadcrumb-back">
-            ‹ Taxonomy
-          </Link>
+          {showTaxonomyNav && (
+            <Link href="/" className="breadcrumb-back">
+              ‹ Taxonomy
+            </Link>
+          )}
           <h1>Brands</h1>
           <div className="tagline">Onboarding</div>
         </div>
@@ -47,9 +76,17 @@ export default function BrandsPage() {
                   {b.contact_phone ? ` · ${b.contact_phone}` : ''}
                 </div>
               </div>
-              <span className={`status-badge status-${b.onboarding_status}`}>
-                {statusLabel(b.onboarding_status)}
-              </span>
+              <select
+                className={`status-badge status-${b.onboarding_status}`}
+                value={b.onboarding_status}
+                onChange={(e) => handleStatusChange(b.id, e.target.value)}
+              >
+                {ONBOARDING_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {statusLabel(s)}
+                  </option>
+                ))}
+              </select>
             </div>
           ))}
         </div>

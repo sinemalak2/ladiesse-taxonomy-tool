@@ -668,6 +668,11 @@ textarea {
 }
 
 .status-badge {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--color-white);
+  cursor: pointer;
+  font-family: inherit;
   font-size: 10px;
   font-weight: var(--w-light);
   text-transform: uppercase;
@@ -685,9 +690,15 @@ textarea {
 }
 
 .status-badge.status-active {
-  background: var(--color-black);
+  background-color: var(--color-black);
   border-color: var(--color-black);
   color: var(--color-white);
+}
+
+.status-badge.status-suspended,
+.status-badge.status-offboarded {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 .form-card {
@@ -712,11 +723,14 @@ textarea {
   color: var(--color-mid);
 }
 
-.field-group input {
+.field-group input,
+.field-group select {
   padding: 10px 12px;
   border: 1px solid var(--color-rule);
   background: var(--color-white);
   font-size: 13px;
+  font-family: inherit;
+  color: inherit;
 }
 
 .field-row {

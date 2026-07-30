@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 
+const CATEGORY_OPTIONS = ['Ready-to-Wear', 'Accessories', 'Shoes', 'Bags', 'Art Tees', 'Home Goods', 'Other'];
+
 export default function NewBrandPage() {
   const [form, setForm] = useState({
     brandName: '',
@@ -65,12 +67,16 @@ export default function NewBrandPage() {
         <div className="field-row">
           <div className="field-group">
             <label htmlFor="category">Category</label>
-            <input
-              id="category"
-              placeholder="e.g. Ready-to-wear"
-              value={form.category}
-              onChange={set('category')}
-            />
+            <select id="category" value={form.category} onChange={set('category')} required>
+              <option value="" disabled>
+                Select a category
+              </option>
+              {CATEGORY_OPTIONS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field-group">
             <label htmlFor="instagramHandle">Instagram</label>
@@ -113,7 +119,7 @@ export default function NewBrandPage() {
             <label htmlFor="contactPhone">Rep phone</label>
             <input
               id="contactPhone"
-              placeholder="+90 5xx xxx xx xx"
+              placeholder="+1 555 123 4567"
               value={form.contactPhone}
               onChange={set('contactPhone')}
               required

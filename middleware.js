@@ -30,6 +30,13 @@ export async function middleware(request) {
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   const session = await verifySessionToken(token);
   if (session) {
+    // brands.ladiesse.com is a second domain on this same deployment,
+    // dedicated to the brand onboarding pages — its root should land on
+    // the brands list rather than the product tagging tool.
+    const hostname = request.headers.get('host') || '';
+    if (hostname.startsWith('brands.ladiesse.com') && pathname === '/') {
+      return NextResponse.rewrite(new URL('/brands', request.url));
+    }
     return NextResponse.next();
   }
 

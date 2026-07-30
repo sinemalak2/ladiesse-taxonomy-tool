@@ -18,7 +18,7 @@ export async function middleware(request) {
     }
   }
 
-  // ladiesse-ai-search calls this server-to-server at query time — no
+  // ladiesse-market-place-orders calls this server-to-server at query time — no
   // browser session, own bearer secret (see api/users/[user_key]/affinity/route.js).
   if (pathname.startsWith('/api/users/') && pathname.endsWith('/affinity')) {
     const authHeader = request.headers.get('authorization');

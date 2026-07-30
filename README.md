@@ -148,7 +148,7 @@ metafield publishing above, so no extra Shopify setup if that already works).
 
 Nightly pipeline that turns GA4 behavior (views, searches, cart adds,
 purchases) into per-user affinity scores against the tag taxonomy above —
-feeds ranking in `ladiesse-ai-search.vercel.app`.
+feeds ranking in `ladiesse-market-place-orders` (`shopify-webhook.ladiesse.com`).
 
 **Verified against real ladiesse.com BigQuery export data (2026-07-21):**
 GA4's `items[].item_id` is Shopify's own format,
@@ -186,7 +186,7 @@ events the moment their product is discontinued.
    score }, ...]`, read-only. Returns `[]` below `COLD_START_MIN_EVENTS`
    total events for that user, so the search backend falls back to pure
    semantic match instead of ranking on a noisy vector. Called
-   server-to-server by `ladiesse-ai-search` — no browser session, so it's
+   server-to-server by `ladiesse-market-place-orders` — no browser session, so it's
    gated by its own `AFFINITY_API_SECRET` bearer secret (see
    `middleware.js`) rather than the login gate, the same way `/api/sync`
    handles Vercel Cron.
@@ -217,4 +217,4 @@ npm test
 Pure logic (upsert classification, tag-cap validation, metafield
 construction, pagination, affinity scoring/decay/keyword-matching) is
 extracted into `lib/` and tested with Node's built-in test runner, matching
-the convention used in `ladiesse-ai-search`.
+the convention used in `ladiesse-market-place-orders`.

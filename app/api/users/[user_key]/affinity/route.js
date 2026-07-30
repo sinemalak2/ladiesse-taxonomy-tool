@@ -3,7 +3,7 @@ import { query } from '../../../../../lib/db.js';
 import { COLD_START_MIN_EVENTS } from '../../../../../lib/affinity-config.js';
 
 // GET /api/users/:user_key/affinity -> [{ category_key, attribute_value, score }, ...]
-// Called by ladiesse-ai-search at query time, server-to-server (see
+// Called by ladiesse-market-place-orders at query time, server-to-server (see
 // middleware.js for the bearer-secret exemption from the login gate). Cold
 // start: below COLD_START_MIN_EVENTS total events, return [] so the caller
 // falls back to pure semantic match rather than ranking on a noisy vector.

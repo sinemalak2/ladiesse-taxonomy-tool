@@ -15,10 +15,7 @@ const EDITABLE_FIELDS = [
   'warehouse_address',
   'avg_processing_days',
   'shipping_carrier',
-  'commission_percentage',
   'payout_frequency',
-  'contract_signed_date',
-  'contract_url',
   'notes',
   'account_holder_name',
   'iban',
@@ -28,12 +25,7 @@ const EDITABLE_FIELDS = [
 function toFormValue(brand) {
   const form = {};
   for (const field of EDITABLE_FIELDS) {
-    const v = brand[field];
-    if (field === 'contract_signed_date' && v) {
-      form[field] = v.slice(0, 10); // ISO date -> yyyy-mm-dd for <input type="date">
-    } else {
-      form[field] = v ?? '';
-    }
+    form[field] = brand[field] ?? '';
   }
   return form;
 }
@@ -45,6 +37,8 @@ export default function BrandDetailPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
     fetch(`/api/brands/${id}`)
@@ -81,11 +75,42 @@ export default function BrandDetailPage() {
         throw new Error(data.error || 'Could not save brand');
       }
 
+      // The PATCH response only echoes back a few fields — refetch the full
+      // record so the page (including the read-only Onboarding section
+      // below the form) actually reflects what was just saved, instead of
+      // showing whatever was fetched on the initial page load.
+      const refreshed = await fetch(`/api/brands/${id}`).then((r) => r.json());
+      if (!refreshed.error) {
+        setBrand(refreshed.brand);
+        setForm(toFormValue(refreshed.brand));
+      }
+
       setSavedAt(Date.now());
     } catch (err) {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  function copyOnboardLink() {
+    const fullUrl = `${window.location.origin}/onboard/${brand.onboarding_token}`;
+    navigator.clipboard.writeText(fullUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  async function handleRegenerate() {
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/api/brands/${id}/regenerate-token`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setBrand((b) => ({ ...b, onboarding_token: data.onboarding_token }));
+      }
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -184,16 +209,8 @@ export default function BrandDetailPage() {
         <div className="section-heading">Commercial terms</div>
         <div className="field-row">
           <div className="field-group">
-            <label htmlFor="commission_percentage">Commission %</label>
-            <input
-              id="commission_percentage"
-              type="number"
-              min="0"
-              max="100"
-              step="0.01"
-              value={form.commission_percentage}
-              onChange={set('commission_percentage')}
-            />
+            <label>Commission</label>
+            <div className="status-text">40% — fixed platform-wide, not editable</div>
           </div>
           <div className="field-group">
             <label htmlFor="payout_frequency">Payout frequency</label>
@@ -204,27 +221,6 @@ export default function BrandDetailPage() {
                 </option>
               ))}
             </select>
-          </div>
-        </div>
-        <div className="field-row">
-          <div className="field-group">
-            <label htmlFor="contract_signed_date">Contract signed date</label>
-            <input
-              id="contract_signed_date"
-              type="date"
-              value={form.contract_signed_date}
-              onChange={set('contract_signed_date')}
-            />
-          </div>
-          <div className="field-group">
-            <label htmlFor="contract_url">Contract URL</label>
-            <input
-              id="contract_url"
-              type="url"
-              placeholder="https://"
-              value={form.contract_url}
-              onChange={set('contract_url')}
-            />
           </div>
         </div>
 
@@ -263,6 +259,71 @@ export default function BrandDetailPage() {
           {savedAt && <span className="status-text">Saved</span>}
         </div>
       </form>
+
+      <div className="form-card">
+        <div className="section-heading">Onboarding</div>
+
+        <div className="field-group">
+          <label htmlFor="onboardLink">Wizard link</label>
+          <input
+            id="onboardLink"
+            readOnly
+            value={typeof window !== 'undefined' ? `${window.location.origin}/onboard/${brand.onboarding_token}` : ''}
+            onFocus={(e) => e.target.select()}
+          />
+        </div>
+        <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+          <button type="button" className="btn" onClick={copyOnboardLink}>
+            {copied ? 'Copied!' : 'Copy link'}
+          </button>
+          <button type="button" className="btn" onClick={handleRegenerate} disabled={regenerating}>
+            {regenerating ? 'Regenerating…' : 'Regenerate link'}
+          </button>
+          <span className="status-text">Step {brand.current_step ?? 1} of 10</span>
+        </div>
+
+        <div className="section-heading">Contract</div>
+        {brand.contract_status ? (
+          <div className="status-text">
+            {brand.contract_status === 'signed' && (
+              <>
+                Signed by {brand.contract_signed_by_name} on{' '}
+                {new Date(brand.contract_signed_at).toLocaleDateString()}
+                {brand.contract_pdf_url && (
+                  <>
+                    {' · '}
+                    <a href={brand.contract_pdf_url} target="_blank" rel="noreferrer">
+                      View PDF
+                    </a>
+                  </>
+                )}
+              </>
+            )}
+            {brand.contract_status === 'voided' && 'Voided — awaiting a new contract'}
+            {brand.contract_status === 'pending' && 'Generated, not yet signed'}
+          </div>
+        ) : (
+          <div className="status-text">No contract generated yet</div>
+        )}
+
+        <div className="section-heading">Platform connection</div>
+        <div className="status-text">
+          {brand.platform_status
+            ? `${brand.platform_shop_domain} · ${brand.platform_status}`
+            : 'Not connected'}
+        </div>
+
+        <div className="section-heading">Last product sync</div>
+        <div className="status-text">
+          {brand.sync_status
+            ? `${brand.sync_status}${brand.sync_completed_at ? ' · ' + new Date(brand.sync_completed_at).toLocaleString() : ''}${
+                brand.sync_status === 'completed'
+                  ? ` · ${brand.sync_products_created} created, ${brand.sync_products_updated} updated`
+                  : ''
+              }`
+            : 'No sync yet'}
+        </div>
+      </div>
     </div>
   );
 }

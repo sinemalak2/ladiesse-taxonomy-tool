@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { SESSION_COOKIE_NAME, verifySessionToken } from './lib/auth.js';
+import { BRAND_SESSION_COOKIE_NAME, verifyBrandSessionToken } from './lib/brandAuth.js';
 
 export const config = {
   matcher: ['/((?!api/login|login|_next/static|_next/image|favicon.ico).*)'],
@@ -25,6 +26,36 @@ export async function middleware(request) {
     if (process.env.AFFINITY_API_SECRET && authHeader === `Bearer ${process.env.AFFINITY_API_SECRET}`) {
       return NextResponse.next();
     }
+  }
+
+  // Brand onboarding wizard — its own session (ladiesse_brand_session),
+  // entirely separate from the staff cookie below. A brand's link never
+  // grants staff access and vice versa. Note: Shopify's OAuth callback and
+  // webhook endpoints (added in later phases) will need their own
+  // pass-through entries here, since Shopify calls them with no session.
+  if (pathname === '/api/onboard/session') {
+    return NextResponse.next(); // this route establishes the session itself
+  }
+
+  if (pathname.startsWith('/onboard/')) {
+    const segments = pathname.split('/').filter(Boolean); // ['onboard', token, ...]
+    if (segments.length === 2) {
+      // /onboard/<token> is the brand's "login" page — always public.
+      return NextResponse.next();
+    }
+    const brandToken = request.cookies.get(BRAND_SESSION_COOKIE_NAME)?.value;
+    const brandSession = await verifyBrandSessionToken(brandToken);
+    if (brandSession) return NextResponse.next();
+    // No/expired session this deep in the flow — bounce back to the landing
+    // page so it can re-establish one from the token already in the URL.
+    return NextResponse.redirect(new URL(`/onboard/${segments[1]}`, request.url));
+  }
+
+  if (pathname.startsWith('/api/onboard/')) {
+    const brandToken = request.cookies.get(BRAND_SESSION_COOKIE_NAME)?.value;
+    const brandSession = await verifyBrandSessionToken(brandToken);
+    if (brandSession) return NextResponse.next();
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;

@@ -17,6 +17,8 @@ export default function NewBrandPage() {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState(null); // { brand, onboard_url }
+  const [copied, setCopied] = useState(false);
 
   function set(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -39,11 +41,50 @@ export default function NewBrandPage() {
         throw new Error(data.error || 'Could not create brand');
       }
 
-      window.location.href = '/brands';
+      const data = await res.json();
+      setCreated(data);
+      setLoading(false);
     } catch (err) {
       setError(err.message);
       setLoading(false);
     }
+  }
+
+  function copyOnboardLink() {
+    const fullUrl = `${window.location.origin}${created.onboard_url}`;
+    navigator.clipboard.writeText(fullUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  if (created) {
+    const fullUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}${created.onboard_url}`;
+    return (
+      <div className="page-shell">
+        <div className="page-header">
+          <div>
+            <h1>Brand created</h1>
+            <div className="tagline">{created.brand.brand_name}</div>
+          </div>
+        </div>
+
+        <div className="form-card">
+          <div className="field-group">
+            <label htmlFor="onboardLink">Onboarding link — send this to the brand</label>
+            <input id="onboardLink" readOnly value={fullUrl} onFocus={(e) => e.target.select()} />
+          </div>
+          <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+            <button type="button" className="btn btn-gold" onClick={copyOnboardLink}>
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
+            <Link href="/brands" className="btn">
+              Done — back to Brands
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

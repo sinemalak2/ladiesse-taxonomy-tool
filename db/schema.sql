@@ -122,13 +122,16 @@ CREATE TABLE IF NOT EXISTS brands (
   shipping_carrier          TEXT,
 
   -- Commercial terms
-  commission_percentage     NUMERIC(5,2) NOT NULL DEFAULT 40.00,
+  commission_percentage     NUMERIC(5,2) NOT NULL DEFAULT 40.00
+                             CHECK (commission_percentage = 40.00), -- fixed platform-wide, not brand-negotiable
   payout_frequency          TEXT NOT NULL DEFAULT 'monthly'
                              CHECK (payout_frequency IN ('weekly','biweekly','monthly')),
-  contract_signed_date      DATE,
-  contract_url              TEXT,
+  contract_signed_date      DATE,                          -- DEPRECATED: superseded by brand_contracts.signed_at
+  contract_url              TEXT,                          -- DEPRECATED: superseded by brand_contracts.pdf_url
 
   -- Integration
+  -- DEPRECATED: the three columns below are superseded by brand_platform_connections
+  -- (per-brand OAuth, added for the onboarding wizard). Left in place, unused by new code.
   shopify_oauth_status      TEXT NOT NULL DEFAULT 'not_connected'
                              CHECK (shopify_oauth_status IN ('not_connected','connected','revoked')),
   shopify_shop_domain       TEXT,
@@ -137,15 +140,42 @@ CREATE TABLE IF NOT EXISTS brands (
   -- Status & lifecycle
   onboarding_status         TEXT NOT NULL DEFAULT 'pending'
                              CHECK (onboarding_status IN
-                                ('pending','under_review','terms_set',
-                                 'integration_pending','active','paused',
-                                 'suspended','offboarded')),
+                                ('pending','under_review','terms_set','contract_generated',
+                                 'contract_signed','platform_connected','syncing_products',
+                                 'active','paused','suspended','offboarded')),
+  onboarding_token          TEXT UNIQUE,                   -- brand-facing wizard magic-link token
+  current_step              SMALLINT NOT NULL DEFAULT 1,   -- wizard progress, 1-10
   live_at                   TIMESTAMPTZ,                   -- when catalogue went live
   notes                     TEXT,                          -- internal notes
 
   created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ADD COLUMN IF NOT EXISTS so this is safe to re-run against a database that
+-- already had `brands` from before the onboarding wizard existed.
+ALTER TABLE brands ADD COLUMN IF NOT EXISTS onboarding_token TEXT UNIQUE;
+ALTER TABLE brands ADD COLUMN IF NOT EXISTS current_step SMALLINT NOT NULL DEFAULT 1;
+
+-- Commission is fixed platform-wide at 40%, not something brands negotiate
+-- individually — enforced here (not just in the API) so it can't drift via
+-- any future write path. Both existing rows are already 40.00.
+ALTER TABLE brands DROP CONSTRAINT IF EXISTS brands_commission_percentage_check;
+ALTER TABLE brands ADD CONSTRAINT brands_commission_percentage_check
+  CHECK (commission_percentage = 40.00);
+
+-- Postgres has no `ADD CONSTRAINT IF NOT EXISTS` — drop-then-add is the
+-- idempotent pattern, needed because this file re-runs in full on every
+-- `npm run migrate`. 'integration_pending' is dropped from the allowed set
+-- (superseded by the wizard's more granular statuses); confirm no row still
+-- has it before deploying this against prod.
+ALTER TABLE brands DROP CONSTRAINT IF EXISTS brands_onboarding_status_check;
+ALTER TABLE brands ADD CONSTRAINT brands_onboarding_status_check
+  CHECK (onboarding_status IN (
+    'pending','under_review','terms_set','contract_generated',
+    'contract_signed','platform_connected','syncing_products',
+    'active','paused','suspended','offboarded'
+  ));
 
 -- One or more reps per brand (billing contact separate from primary, etc).
 CREATE TABLE IF NOT EXISTS brand_contacts (
@@ -180,3 +210,120 @@ CREATE TABLE IF NOT EXISTS brand_bank_accounts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_brand_bank_accounts_brand_id ON brand_bank_accounts(brand_id);
+
+-- Onboarding wizard: one row per generated contract. Signed rows are never
+-- UPDATEd (only pdf_url is added after the fact) — renegotiation means
+-- voiding this row and inserting a fresh one, so there's a full audit trail
+-- of exactly what language a brand agreed to at any point in time.
+CREATE TABLE IF NOT EXISTS brand_contracts (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_id          UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+
+  contract_html     TEXT NOT NULL,               -- snapshot at generation time, never re-rendered from live data
+  pdf_url           TEXT,                        -- populated once PDF generation is wired up
+
+  status            TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','signed','voided')),
+
+  signed_at         TIMESTAMPTZ,
+  signed_by_name    TEXT,                        -- typed full legal name at signing
+  signed_ip         TEXT,
+  signed_user_agent TEXT,
+
+  voided_at         TIMESTAMPTZ,
+  voided_reason     TEXT,
+
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_brand_contracts_brand_id ON brand_contracts(brand_id);
+
+-- Onboarding wizard: per-brand e-commerce platform connections. Shopify only
+-- for now (see the platform CHECK), architected to extend to other
+-- platforms later without a schema change beyond widening that CHECK.
+CREATE TABLE IF NOT EXISTS brand_platform_connections (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_id         UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+
+  platform         TEXT NOT NULL DEFAULT 'shopify'
+                   CHECK (platform IN ('shopify')),
+
+  shop_domain      TEXT NOT NULL,
+  access_token_ref TEXT NOT NULL,                -- AES-256-GCM ciphertext, never a raw token
+  scope            TEXT,                         -- comma-separated scopes Shopify granted
+
+  status           TEXT NOT NULL DEFAULT 'active'
+                   CHECK (status IN ('active','revoked')),
+  connected_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at       TIMESTAMPTZ,
+
+  UNIQUE (brand_id, platform)
+);
+
+CREATE INDEX IF NOT EXISTS idx_brand_platform_connections_brand_id ON brand_platform_connections(brand_id);
+
+-- Onboarding wizard: brand product catalogue synced from their own Shopify
+-- store. Deliberately separate from the top-level `products` table (Ladiesse's
+-- own store cache, TEXT PK on Shopify GID) — these are structurally
+-- different (per-brand, UUID PK) and would collide on the name `products`.
+CREATE TABLE IF NOT EXISTS brand_products (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_id               UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+  platform_connection_id UUID REFERENCES brand_platform_connections(id) ON DELETE SET NULL,
+
+  shopify_product_gid    TEXT NOT NULL,
+  title                  TEXT NOT NULL,
+  body_html              TEXT,
+  handle                 TEXT,
+  product_type           TEXT,
+  vendor                 TEXT,
+  status                 TEXT,
+  raw_shopify_data       JSONB,
+  synced_at              TIMESTAMPTZ DEFAULT now(),
+
+  UNIQUE (brand_id, shopify_product_gid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_brand_products_brand_id ON brand_products(brand_id);
+
+CREATE TABLE IF NOT EXISTS brand_product_variants (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_product_id    UUID NOT NULL REFERENCES brand_products(id) ON DELETE CASCADE,
+
+  shopify_variant_gid TEXT NOT NULL,
+  title               TEXT,
+  sku                 TEXT,
+  price               NUMERIC,
+  compare_at_price    NUMERIC,
+  inventory_quantity  INT DEFAULT 0,
+  inventory_item_gid  TEXT,                      -- for matching inventory_levels/update webhooks
+  image_url           TEXT,
+
+  UNIQUE (brand_product_id, shopify_variant_gid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_brand_product_variants_brand_product_id ON brand_product_variants(brand_product_id);
+
+-- Onboarding wizard: audit log for each product sync attempt (initial sync
+-- at Step 9, plus any later manual/cron re-syncs).
+CREATE TABLE IF NOT EXISTS product_sync_jobs (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_id               UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+  platform_connection_id UUID REFERENCES brand_platform_connections(id) ON DELETE SET NULL,
+
+  status                 TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending','running','completed','failed')),
+  triggered_by           TEXT NOT NULL DEFAULT 'wizard'
+                         CHECK (triggered_by IN ('wizard','webhook','manual','cron')),
+
+  products_created       INT DEFAULT 0,
+  products_updated       INT DEFAULT 0,
+  products_unchanged     INT DEFAULT 0,
+  error_message          TEXT,
+
+  started_at             TIMESTAMPTZ,
+  completed_at           TIMESTAMPTZ,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_sync_jobs_brand_id ON product_sync_jobs(brand_id);

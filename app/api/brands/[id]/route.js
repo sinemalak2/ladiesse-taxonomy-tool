@@ -5,7 +5,10 @@ const ONBOARDING_STATUSES = [
   'pending',
   'under_review',
   'terms_set',
-  'integration_pending',
+  'contract_generated',
+  'contract_signed',
+  'platform_connected',
+  'syncing_products',
   'active',
   'paused',
   'suspended',
@@ -27,8 +30,6 @@ const EDITABLE_BRAND_FIELDS = [
   'warehouse_address',
   'shipping_carrier',
   'payout_frequency',
-  'contract_signed_date',
-  'contract_url',
   'notes',
 ];
 
@@ -39,7 +40,12 @@ export async function GET(request, { params }) {
     `SELECT
        b.*,
        c.full_name AS contact_name, c.email AS contact_email, c.phone_number AS contact_phone,
-       ba.account_holder_name, ba.iban, ba.bank_name
+       ba.account_holder_name, ba.iban, ba.bank_name,
+       ct.id AS contract_id, ct.status AS contract_status, ct.signed_at AS contract_signed_at,
+       ct.signed_by_name AS contract_signed_by_name, ct.pdf_url AS contract_pdf_url,
+       pc.status AS platform_status, pc.shop_domain AS platform_shop_domain,
+       sj.status AS sync_status, sj.products_created AS sync_products_created,
+       sj.products_updated AS sync_products_updated, sj.completed_at AS sync_completed_at
      FROM brands b
      LEFT JOIN LATERAL (
        SELECT full_name, email, phone_number
@@ -55,6 +61,26 @@ export async function GET(request, { params }) {
        ORDER BY created_at DESC
        LIMIT 1
      ) ba ON true
+     LEFT JOIN LATERAL (
+       SELECT id, status, signed_at, signed_by_name, pdf_url
+       FROM brand_contracts
+       WHERE brand_id = b.id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) ct ON true
+     LEFT JOIN LATERAL (
+       SELECT status, shop_domain
+       FROM brand_platform_connections
+       WHERE brand_id = b.id AND platform = 'shopify'
+       LIMIT 1
+     ) pc ON true
+     LEFT JOIN LATERAL (
+       SELECT status, products_created, products_updated, completed_at
+       FROM product_sync_jobs
+       WHERE brand_id = b.id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) sj ON true
      WHERE b.id = $1`,
     [id]
   );
@@ -78,13 +104,6 @@ export async function PATCH(request, { params }) {
   }
   if (body.payout_frequency !== undefined && !PAYOUT_FREQUENCIES.includes(body.payout_frequency)) {
     return NextResponse.json({ error: 'Invalid payout_frequency' }, { status: 400 });
-  }
-  if (
-    body.commission_percentage !== undefined &&
-    body.commission_percentage !== null &&
-    Number.isNaN(Number(body.commission_percentage))
-  ) {
-    return NextResponse.json({ error: 'Invalid commission_percentage' }, { status: 400 });
   }
   if (
     body.avg_processing_days !== undefined &&
@@ -112,10 +131,9 @@ export async function PATCH(request, { params }) {
       );
     }
 
-    if (body.commission_percentage !== undefined) {
-      values.push(body.commission_percentage);
-      setClauses.push(`commission_percentage = $${values.length}`);
-    }
+    // commission_percentage is intentionally not writable here — it's fixed
+    // platform-wide at 40% (enforced by a DB CHECK constraint), not a
+    // per-brand negotiated term.
 
     if (body.avg_processing_days !== undefined) {
       values.push(body.avg_processing_days);

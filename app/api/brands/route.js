@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getPool, query } from '../../../lib/db.js';
 
@@ -60,11 +61,15 @@ export async function POST(request) {
       slug = `${base}-${suffix}`;
     }
 
+    // 64-char hex token for the brand's onboarding wizard magic link — never
+    // guessable, regenerable from the admin page if it leaks.
+    const onboardingToken = randomBytes(32).toString('hex');
+
     const { rows: brandRows } = await client.query(
-      `INSERT INTO brands (brand_name, slug, category, website_url, instagram_handle)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, brand_name, slug, category, onboarding_status, created_at`,
-      [brandName, slug, category, websiteUrl, instagramHandle]
+      `INSERT INTO brands (brand_name, slug, category, website_url, instagram_handle, onboarding_token)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, brand_name, slug, category, onboarding_status, onboarding_token, created_at`,
+      [brandName, slug, category, websiteUrl, instagramHandle, onboardingToken]
     );
     const brand = brandRows[0];
 
@@ -75,7 +80,10 @@ export async function POST(request) {
     );
 
     await client.query('COMMIT');
-    return NextResponse.json({ brand }, { status: 201 });
+    return NextResponse.json(
+      { brand, onboarding_token: brand.onboarding_token, onboard_url: `/onboard/${brand.onboarding_token}` },
+      { status: 201 }
+    );
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

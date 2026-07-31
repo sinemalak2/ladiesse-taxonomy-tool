@@ -62,14 +62,14 @@ export default function BrandsList({ showTaxonomyNav }) {
         <div className="brand-list">
           {brands.map((b) => (
             <div className="brand-row" key={b.id}>
-              <div className="meta">
+              <Link href={`/brands/${b.id}`} className="meta">
                 <div className="name">{b.brand_name}</div>
                 <div className="sub">
                   {b.contact_name || 'No contact'}
                   {b.contact_email ? ` · ${b.contact_email}` : ''}
                   {b.contact_phone ? ` · ${b.contact_phone}` : ''}
                 </div>
-              </div>
+              </Link>
               <select
                 className={`status-badge status-${b.onboarding_status}`}
                 value={b.onboarding_status}

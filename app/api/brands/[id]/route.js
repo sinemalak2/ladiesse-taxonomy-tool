@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query } from '../../../../lib/db.js';
+import { getPool, query } from '../../../../lib/db.js';
 
 const ONBOARDING_STATUSES = [
   'pending',
@@ -12,30 +12,180 @@ const ONBOARDING_STATUSES = [
   'offboarded',
 ];
 
-export async function PATCH(request, { params }) {
+const PAYOUT_FREQUENCIES = ['weekly', 'biweekly', 'monthly'];
+
+// Plain-text columns on brands that the edit page is allowed to write,
+// grouped the same way the schema comments group them (legal/ops/etc).
+// Keeping this as a whitelist (rather than spreading req body into the
+// UPDATE) means a stray field in the request body can't reach the query.
+const EDITABLE_BRAND_FIELDS = [
+  'legal_company_name',
+  'legal_address',
+  'tax_id',
+  'tax_office',
+  'trade_registry_no',
+  'warehouse_address',
+  'shipping_carrier',
+  'payout_frequency',
+  'contract_signed_date',
+  'contract_url',
+  'notes',
+];
+
+export async function GET(request, { params }) {
   const { id } = await params;
-  const { onboarding_status: status } = await request.json();
 
-  if (!ONBOARDING_STATUSES.includes(status)) {
-    return NextResponse.json({ error: 'Invalid onboarding_status' }, { status: 400 });
-  }
-
-  // live_at is set the first time a brand reaches 'active' and never
-  // cleared afterward, so it stays a record of when the catalogue first
-  // went live even if the brand later pauses/offboards.
   const { rows } = await query(
-    `UPDATE brands
-     SET onboarding_status = $1,
-         live_at = CASE WHEN $1 = 'active' AND live_at IS NULL THEN now() ELSE live_at END,
-         updated_at = now()
-     WHERE id = $2
-     RETURNING id, brand_name, onboarding_status`,
-    [status, id]
+    `SELECT
+       b.*,
+       c.full_name AS contact_name, c.email AS contact_email, c.phone_number AS contact_phone,
+       ba.account_holder_name, ba.iban, ba.bank_name
+     FROM brands b
+     LEFT JOIN LATERAL (
+       SELECT full_name, email, phone_number
+       FROM brand_contacts
+       WHERE brand_id = b.id
+       ORDER BY is_primary DESC, created_at ASC
+       LIMIT 1
+     ) c ON true
+     LEFT JOIN LATERAL (
+       SELECT account_holder_name, iban, bank_name
+       FROM brand_bank_accounts
+       WHERE brand_id = b.id AND is_active = true
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) ba ON true
+     WHERE b.id = $1`,
+    [id]
   );
 
   if (rows.length === 0) {
     return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ brand: rows[0] });
+  // shopify_access_token_ref is a pointer into the secrets store, not
+  // something the edit UI should ever display or round-trip.
+  const { shopify_access_token_ref, ...brand } = rows[0];
+  return NextResponse.json({ brand });
+}
+
+export async function PATCH(request, { params }) {
+  const { id } = await params;
+  const body = await request.json();
+
+  if (body.onboarding_status !== undefined && !ONBOARDING_STATUSES.includes(body.onboarding_status)) {
+    return NextResponse.json({ error: 'Invalid onboarding_status' }, { status: 400 });
+  }
+  if (body.payout_frequency !== undefined && !PAYOUT_FREQUENCIES.includes(body.payout_frequency)) {
+    return NextResponse.json({ error: 'Invalid payout_frequency' }, { status: 400 });
+  }
+  if (
+    body.commission_percentage !== undefined &&
+    body.commission_percentage !== null &&
+    Number.isNaN(Number(body.commission_percentage))
+  ) {
+    return NextResponse.json({ error: 'Invalid commission_percentage' }, { status: 400 });
+  }
+  if (
+    body.avg_processing_days !== undefined &&
+    body.avg_processing_days !== null &&
+    Number.isNaN(Number(body.avg_processing_days))
+  ) {
+    return NextResponse.json({ error: 'Invalid avg_processing_days' }, { status: 400 });
+  }
+
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+
+    const setClauses = ['updated_at = now()'];
+    const values = [];
+
+    if (body.onboarding_status !== undefined) {
+      values.push(body.onboarding_status);
+      setClauses.push(`onboarding_status = $${values.length}`);
+      // live_at is set the first time a brand reaches 'active' and never
+      // cleared afterward, so it stays a record of when the catalogue
+      // first went live even if the brand later pauses/offboards.
+      setClauses.push(
+        `live_at = CASE WHEN $${values.length} = 'active' AND live_at IS NULL THEN now() ELSE live_at END`
+      );
+    }
+
+    if (body.commission_percentage !== undefined) {
+      values.push(body.commission_percentage);
+      setClauses.push(`commission_percentage = $${values.length}`);
+    }
+
+    if (body.avg_processing_days !== undefined) {
+      values.push(body.avg_processing_days);
+      setClauses.push(`avg_processing_days = $${values.length}`);
+    }
+
+    for (const field of EDITABLE_BRAND_FIELDS) {
+      if (body[field] === undefined) continue;
+      const v = typeof body[field] === 'string' ? body[field].trim() || null : body[field];
+      values.push(v);
+      setClauses.push(`${field} = $${values.length}`);
+    }
+
+    let brand;
+    if (values.length > 0) {
+      values.push(id);
+      const { rows } = await client.query(
+        `UPDATE brands SET ${setClauses.join(', ')} WHERE id = $${values.length} RETURNING id, brand_name, onboarding_status`,
+        values
+      );
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
+      }
+      brand = rows[0];
+    } else {
+      const { rows } = await client.query(
+        'SELECT id, brand_name, onboarding_status FROM brands WHERE id = $1',
+        [id]
+      );
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
+      }
+      brand = rows[0];
+    }
+
+    // Bank details live in their own table (kept off the wide brands row
+    // for auditability — see schema comment). Upsert the single active
+    // account rather than always inserting a new row.
+    if (body.account_holder_name !== undefined || body.iban !== undefined || body.bank_name !== undefined) {
+      const { rows: existing } = await client.query(
+        'SELECT id FROM brand_bank_accounts WHERE brand_id = $1 AND is_active = true ORDER BY created_at DESC LIMIT 1',
+        [id]
+      );
+
+      if (existing.length > 0) {
+        await client.query(
+          `UPDATE brand_bank_accounts
+           SET account_holder_name = COALESCE($1, account_holder_name),
+               iban = COALESCE($2, iban),
+               bank_name = COALESCE($3, bank_name)
+           WHERE id = $4`,
+          [body.account_holder_name || null, body.iban || null, body.bank_name || null, existing[0].id]
+        );
+      } else if (body.account_holder_name && body.iban) {
+        await client.query(
+          `INSERT INTO brand_bank_accounts (brand_id, account_holder_name, iban, bank_name)
+           VALUES ($1, $2, $3, $4)`,
+          [id, body.account_holder_name, body.iban, body.bank_name || null]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return NextResponse.json({ brand });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }

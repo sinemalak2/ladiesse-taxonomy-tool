@@ -263,24 +263,37 @@ export default function BrandDetailPage() {
       <div className="form-card">
         <div className="section-heading">Onboarding</div>
 
-        <div className="field-group">
-          <label htmlFor="onboardLink">Wizard link</label>
-          <input
-            id="onboardLink"
-            readOnly
-            value={typeof window !== 'undefined' ? `${window.location.origin}/onboard/${brand.onboarding_token}` : ''}
-            onFocus={(e) => e.target.select()}
-          />
-        </div>
-        <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
-          <button type="button" className="btn" onClick={copyOnboardLink}>
-            {copied ? 'Copied!' : 'Copy link'}
-          </button>
-          <button type="button" className="btn" onClick={handleRegenerate} disabled={regenerating}>
-            {regenerating ? 'Regenerating…' : 'Regenerate link'}
-          </button>
-          <span className="status-text">Step {brand.current_step ?? 1} of 10</span>
-        </div>
+        {brand.onboarding_token ? (
+          <>
+            <div className="field-group">
+              <label htmlFor="onboardLink">Wizard link</label>
+              <input
+                id="onboardLink"
+                readOnly
+                value={typeof window !== 'undefined' ? `${window.location.origin}/onboard/${brand.onboarding_token}` : ''}
+                onFocus={(e) => e.target.select()}
+              />
+            </div>
+            <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+              <button type="button" className="btn" onClick={copyOnboardLink}>
+                {copied ? 'Copied!' : 'Copy link'}
+              </button>
+              <button type="button" className="btn" onClick={handleRegenerate} disabled={regenerating}>
+                {regenerating ? 'Regenerating…' : 'Regenerate link'}
+              </button>
+              <span className="status-text">Step {brand.current_step ?? 1} of 10</span>
+            </div>
+          </>
+        ) : (
+          <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+            <div className="status-text">
+              This brand predates the onboarding wizard and has no link yet.
+            </div>
+            <button type="button" className="btn btn-gold" onClick={handleRegenerate} disabled={regenerating}>
+              {regenerating ? 'Generating…' : 'Generate link'}
+            </button>
+          </div>
+        )}
 
         <div className="section-heading">Contract</div>
         {brand.contract_status ? (

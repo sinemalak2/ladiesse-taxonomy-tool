@@ -24,6 +24,7 @@ function statusLabel(status) {
 export default function BrandsList({ showTaxonomyNav }) {
   const [brands, setBrands] = useState(null);
   const [ladiesseConnection, setLadiesseConnection] = useState(null);
+  const [ladiesseConnectionLoaded, setLadiesseConnectionLoaded] = useState(false);
 
   useEffect(() => {
     fetch('/api/brands')
@@ -31,7 +32,10 @@ export default function BrandsList({ showTaxonomyNav }) {
       .then((json) => setBrands(json.brands));
     fetch('/api/admin/ladiesse-shopify/status')
       .then((res) => res.json())
-      .then((json) => setLadiesseConnection(json.connection));
+      .then((json) => {
+        setLadiesseConnection(json.connection);
+        setLadiesseConnectionLoaded(true);
+      });
   }, []);
 
   function handleStatusChange(brandId, newStatus) {
@@ -61,7 +65,7 @@ export default function BrandsList({ showTaxonomyNav }) {
         </Link>
       </div>
 
-      {ladiesseConnection !== null && (
+      {ladiesseConnectionLoaded && (
         <div className="form-card" style={{ marginBottom: 24 }}>
           <div className="section-heading">La-diesse's own Shopify connection</div>
           <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>

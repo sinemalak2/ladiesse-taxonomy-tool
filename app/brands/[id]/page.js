@@ -49,6 +49,8 @@ export default function BrandDetailPage() {
   const [syncError, setSyncError] = useState('');
   const [deletingProducts, setDeletingProducts] = useState(false);
   const [deleteProductsMessage, setDeleteProductsMessage] = useState('');
+  const [deletingShopifyProducts, setDeletingShopifyProducts] = useState(false);
+  const [deleteShopifyProductsMessage, setDeleteShopifyProductsMessage] = useState('');
   const [deletingBrand, setDeletingBrand] = useState(false);
 
   useEffect(() => {
@@ -162,6 +164,30 @@ export default function BrandDetailPage() {
       setDeleteProductsMessage(err.message);
     } finally {
       setDeletingProducts(false);
+    }
+  }
+
+  async function handleDeleteShopifyProducts() {
+    const ok = window.confirm(
+      `Delete all of ${brand.brand_name}'s products from la-diesse.myshopify.com? This is a real, live delete and cannot be undone.`
+    );
+    if (!ok) return;
+
+    setDeletingShopifyProducts(true);
+    setDeleteShopifyProductsMessage('');
+    try {
+      const res = await fetch(`/api/brands/${id}/delete-shopify-products`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      const failedNote = data.errors.length > 0 ? ` (${data.errors.length} failed — see logs)` : '';
+      setDeleteShopifyProductsMessage(`Deleted ${data.deleted} of ${data.total} product(s) from la-diesse.${failedNote}`);
+
+      const refreshed = await fetch(`/api/brands/${id}`).then((r) => r.json());
+      if (!refreshed.error) setBrand(refreshed.brand);
+    } catch (err) {
+      setDeleteShopifyProductsMessage(err.message);
+    } finally {
+      setDeletingShopifyProducts(false);
     }
   }
 
@@ -446,18 +472,31 @@ export default function BrandDetailPage() {
         {deleteProductsMessage && <div className="status-text">{deleteProductsMessage}</div>}
 
         <div className="section-heading">Import into la-diesse.myshopify.com (draft products)</div>
-        <div className="status-text">
-          {brand.import_status
-            ? `${brand.import_status}${brand.import_completed_at ? ' · ' + new Date(brand.import_completed_at).toLocaleString() : ''}${
-                brand.import_status === 'completed'
-                  ? ` · ${brand.import_products_created} created, ${brand.import_products_updated} updated`
-                  : ''
-              }`
-            : 'No import yet'}
+        <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+          <div className="status-text">
+            {brand.import_status
+              ? `${brand.import_status}${brand.import_completed_at ? ' · ' + new Date(brand.import_completed_at).toLocaleString() : ''}${
+                  brand.import_status === 'completed'
+                    ? ` · ${brand.import_products_created} created, ${brand.import_products_updated} updated`
+                    : ''
+                }`
+              : 'No import yet'}
+          </div>
+          {brand.import_status && (
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={handleDeleteShopifyProducts}
+              disabled={deletingShopifyProducts}
+            >
+              {deletingShopifyProducts ? 'Deleting…' : 'Delete from Shopify'}
+            </button>
+          )}
         </div>
         {brand.import_status === 'failed' && brand.import_error_message && (
           <div className="login-error">{brand.import_error_message}</div>
         )}
+        {deleteShopifyProductsMessage && <div className="status-text">{deleteShopifyProductsMessage}</div>}
       </div>
 
       <div className="form-card">

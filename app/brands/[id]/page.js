@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { COUNTRY_OPTIONS } from '../../../lib/brandValidation.js';
 
@@ -37,6 +37,7 @@ function toFormValue(brand) {
 
 export default function BrandDetailPage() {
   const { id } = useParams();
+  const router = useRouter();
   const [brand, setBrand] = useState(null);
   const [form, setForm] = useState(null);
   const [error, setError] = useState('');
@@ -46,6 +47,9 @@ export default function BrandDetailPage() {
   const [regenerating, setRegenerating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState('');
+  const [deletingProducts, setDeletingProducts] = useState(false);
+  const [deleteProductsMessage, setDeleteProductsMessage] = useState('');
+  const [deletingBrand, setDeletingBrand] = useState(false);
 
   useEffect(() => {
     fetch(`/api/brands/${id}`)
@@ -135,6 +139,48 @@ export default function BrandDetailPage() {
       setSyncError(err.message);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleDeleteProducts() {
+    const ok = window.confirm(
+      `Delete all of ${brand.brand_name}'s products from la-diesse.myshopify.com? This cannot be undone.`
+    );
+    if (!ok) return;
+
+    setDeletingProducts(true);
+    setDeleteProductsMessage('');
+    try {
+      const res = await fetch(`/api/brands/${id}/delete-products`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      const failedNote = data.errors.length > 0 ? ` (${data.errors.length} failed — see logs)` : '';
+      setDeleteProductsMessage(`Deleted ${data.deleted} of ${data.total} product(s).${failedNote}`);
+
+      const refreshed = await fetch(`/api/brands/${id}`).then((r) => r.json());
+      if (!refreshed.error) setBrand(refreshed.brand);
+    } catch (err) {
+      setDeleteProductsMessage(err.message);
+    } finally {
+      setDeletingProducts(false);
+    }
+  }
+
+  async function handleDeleteBrand() {
+    const ok = window.confirm(
+      `Permanently delete "${brand.brand_name}"? This removes the brand, its contacts, contract, bank details, and platform connection, and deletes any of its products from la-diesse.myshopify.com. This cannot be undone.`
+    );
+    if (!ok) return;
+
+    setDeletingBrand(true);
+    try {
+      const res = await fetch(`/api/brands/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      router.push('/brands');
+    } catch (err) {
+      setError(err.message);
+      setDeletingBrand(false);
     }
   }
 
@@ -391,8 +437,14 @@ export default function BrandDetailPage() {
               {syncing ? 'Syncing…' : 'Sync now'}
             </button>
           )}
+          {brand.import_status && (
+            <button type="button" className="btn" onClick={handleDeleteProducts} disabled={deletingProducts}>
+              {deletingProducts ? 'Deleting…' : 'Delete products'}
+            </button>
+          )}
         </div>
         {syncError && <div className="login-error">{syncError}</div>}
+        {deleteProductsMessage && <div className="status-text">{deleteProductsMessage}</div>}
 
         <div className="section-heading">Import into la-diesse.myshopify.com (draft products)</div>
         <div className="status-text">
@@ -407,6 +459,16 @@ export default function BrandDetailPage() {
         {brand.import_status === 'failed' && brand.import_error_message && (
           <div className="login-error">{brand.import_error_message}</div>
         )}
+      </div>
+
+      <div className="form-card">
+        <div className="section-heading">Danger zone</div>
+        <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+          <div className="status-text">Permanently delete this brand and all of its onboarding data.</div>
+          <button type="button" className="btn btn-danger" onClick={handleDeleteBrand} disabled={deletingBrand}>
+            {deletingBrand ? 'Deleting…' : 'Delete brand'}
+          </button>
+        </div>
       </div>
     </div>
   );

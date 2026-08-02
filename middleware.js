@@ -49,13 +49,6 @@ export async function middleware(request) {
     return NextResponse.next();
   }
 
-  // Shopify redirects here after staff approves App B's install on
-  // la-diesse.myshopify.com itself — no session cookie for this hop either
-  // (same reasoning as the brand callback above), verified via signed state.
-  if (pathname === '/api/admin/ladiesse-shopify/callback') {
-    return NextResponse.next();
-  }
-
   if (pathname.startsWith('/onboard/')) {
     const segments = pathname.split('/').filter(Boolean); // ['onboard', token, ...]
     if (segments.length === 2) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPool, query } from '../../../../lib/db.js';
 import { COUNTRY_OPTIONS } from '../../../../lib/brandValidation.js';
+import { deleteLadiesseImportedProducts } from '../../../../lib/brandProductImport.js';
 
 const ONBOARDING_STATUSES = [
   'pending',
@@ -238,4 +239,27 @@ export async function PATCH(request, { params }) {
   } finally {
     client.release();
   }
+}
+
+export async function DELETE(request, { params }) {
+  const { id } = await params;
+
+  // Best-effort: clean up any drafts this brand pushed into
+  // la-diesse.myshopify.com before the DB row (and its FK-cascaded
+  // brand_products, which carry the only record of those products' GIDs)
+  // disappears. A failure here shouldn't block the actual deletion the
+  // staff member asked for — surfaced in the response either way.
+  let productCleanup = null;
+  try {
+    productCleanup = await deleteLadiesseImportedProducts({ brandId: id });
+  } catch (err) {
+    productCleanup = { error: err.message };
+  }
+
+  const { rows } = await query('DELETE FROM brands WHERE id = $1 RETURNING id', [id]);
+  if (rows.length === 0) {
+    return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true, productCleanup });
 }

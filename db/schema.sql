@@ -414,18 +414,14 @@ CREATE TABLE IF NOT EXISTS product_import_jobs (
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Ladiesse's OWN connection to la-diesse.myshopify.com via App B (the
--- per-brand OAuth app) — NOT App A's client-credentials grant. Needed
--- because lib/brandProductImport.js pushes brand catalogues into
--- la-diesse's own store using App B end-to-end, so App B needs a real
--- installed-token for la-diesse itself, gotten the exact same way a
--- brand connects (authorization-code OAuth), just triggered by staff
--- once rather than by a brand through the wizard. Deliberately separate
--- from brand_platform_connections (brand_id there is NOT NULL — la-diesse
--- isn't a brand) rather than adding a nullable-brand-id special case to
--- that table's semantics. In practice this table holds at most one row;
--- not enforced by a constraint, same convention as brand_platform_connections
--- (most-recent-active-row is the source of truth).
+-- Superseded — lib/brandProductImport.js was briefly wired to push into
+-- la-diesse.myshopify.com via a self-installed App B (per-brand OAuth app)
+-- token stored here, requiring a one-time staff OAuth consent click. That
+-- turned out to be unnecessary complexity: la-diesse is a store WE own, so
+-- pushing into it now uses App A's existing client-credentials grant
+-- (lib/shopify.js) instead — no OAuth consent, no Partners distribution
+-- method needed. Kept, not dropped, in case any row was ever written; no
+-- code path reads from it anymore.
 CREATE TABLE IF NOT EXISTS ladiesse_shopify_connection (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   shop_domain      TEXT NOT NULL,

@@ -1,9 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { step4Schema } from '../../lib/brandValidation.js';
+import { makeStep4Schema } from '../../lib/brandValidation.js';
 
-export default function StepLegalEntity({ initialData, onSuccess }) {
+export default function StepLegalEntity({ initialData, country, onSuccess }) {
+  const isUS = country === 'US';
+  const schema = makeStep4Schema(country);
+
   const [form, setForm] = useState({
     legal_company_name: initialData.legal_company_name || '',
     legal_address: initialData.legal_address || '',
@@ -25,7 +28,7 @@ export default function StepLegalEntity({ initialData, onSuccess }) {
     e.preventDefault();
     setError('');
 
-    const parsed = step4Schema.safeParse(form);
+    const parsed = schema.safeParse(form);
     if (!parsed.success) {
       setFieldErrors(parsed.error.flatten().fieldErrors);
       return;
@@ -74,15 +77,19 @@ export default function StepLegalEntity({ initialData, onSuccess }) {
 
       <div className="field-row">
         <div className="field-group">
-          <label htmlFor="tax_id">Tax ID — VKN (company, 10 digits) or TC Kimlik No (individual, 11 digits)</label>
-          <input id="tax_id" value={form.tax_id} onChange={set('tax_id')} />
+          <label htmlFor="tax_id">
+            {isUS ? 'EIN (9 digits, e.g. 12-3456789)' : 'Tax ID — VKN (company, 10 digits) or TC Kimlik No (individual, 11 digits)'}
+          </label>
+          <input id="tax_id" value={form.tax_id} onChange={set('tax_id')} placeholder={isUS ? '12-3456789' : ''} />
           {err('tax_id') && <span className="field-error">{err('tax_id')}</span>}
         </div>
-        <div className="field-group">
-          <label htmlFor="tax_office">Tax office</label>
-          <input id="tax_office" value={form.tax_office} onChange={set('tax_office')} />
-          {err('tax_office') && <span className="field-error">{err('tax_office')}</span>}
-        </div>
+        {!isUS && (
+          <div className="field-group">
+            <label htmlFor="tax_office">Tax office</label>
+            <input id="tax_office" value={form.tax_office} onChange={set('tax_office')} />
+            {err('tax_office') && <span className="field-error">{err('tax_office')}</span>}
+          </div>
+        )}
       </div>
 
       <div className="field-group">

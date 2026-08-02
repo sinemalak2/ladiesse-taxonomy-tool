@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool, query } from '../../../../lib/db.js';
+import { COUNTRY_OPTIONS } from '../../../../lib/brandValidation.js';
 
 const ONBOARDING_STATUSES = [
   'pending',
@@ -22,6 +23,7 @@ const PAYOUT_FREQUENCIES = ['weekly', 'biweekly', 'monthly'];
 // Keeping this as a whitelist (rather than spreading req body into the
 // UPDATE) means a stray field in the request body can't reach the query.
 const EDITABLE_BRAND_FIELDS = [
+  'country',
   'legal_company_name',
   'legal_address',
   'tax_id',
@@ -40,12 +42,15 @@ export async function GET(request, { params }) {
     `SELECT
        b.*,
        c.full_name AS contact_name, c.email AS contact_email, c.phone_number AS contact_phone,
-       ba.account_holder_name, ba.iban, ba.bank_name,
+       ba.account_holder_name, ba.iban, ba.routing_number, ba.account_number, ba.bank_name,
        ct.id AS contract_id, ct.status AS contract_status, ct.signed_at AS contract_signed_at,
        ct.signed_by_name AS contract_signed_by_name, ct.pdf_url AS contract_pdf_url,
        pc.status AS platform_status, pc.shop_domain AS platform_shop_domain,
        sj.status AS sync_status, sj.products_created AS sync_products_created,
-       sj.products_updated AS sync_products_updated, sj.completed_at AS sync_completed_at
+       sj.products_updated AS sync_products_updated, sj.completed_at AS sync_completed_at,
+       ij.status AS import_status, ij.products_created AS import_products_created,
+       ij.products_updated AS import_products_updated, ij.error_message AS import_error_message,
+       ij.completed_at AS import_completed_at
      FROM brands b
      LEFT JOIN LATERAL (
        SELECT full_name, email, phone_number
@@ -55,7 +60,7 @@ export async function GET(request, { params }) {
        LIMIT 1
      ) c ON true
      LEFT JOIN LATERAL (
-       SELECT account_holder_name, iban, bank_name
+       SELECT account_holder_name, iban, routing_number, account_number, bank_name
        FROM brand_bank_accounts
        WHERE brand_id = b.id AND is_active = true
        ORDER BY created_at DESC
@@ -81,6 +86,13 @@ export async function GET(request, { params }) {
        ORDER BY created_at DESC
        LIMIT 1
      ) sj ON true
+     LEFT JOIN LATERAL (
+       SELECT status, products_created, products_updated, error_message, completed_at
+       FROM product_import_jobs
+       WHERE brand_id = b.id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) ij ON true
      WHERE b.id = $1`,
     [id]
   );
@@ -104,6 +116,9 @@ export async function PATCH(request, { params }) {
   }
   if (body.payout_frequency !== undefined && !PAYOUT_FREQUENCIES.includes(body.payout_frequency)) {
     return NextResponse.json({ error: 'Invalid payout_frequency' }, { status: 400 });
+  }
+  if (body.country !== undefined && !COUNTRY_OPTIONS.includes(body.country)) {
+    return NextResponse.json({ error: 'Invalid country' }, { status: 400 });
   }
   if (
     body.avg_processing_days !== undefined &&
@@ -173,8 +188,24 @@ export async function PATCH(request, { params }) {
 
     // Bank details live in their own table (kept off the wide brands row
     // for auditability — see schema comment). Upsert the single active
-    // account rather than always inserting a new row.
-    if (body.account_holder_name !== undefined || body.iban !== undefined || body.bank_name !== undefined) {
+    // account rather than always inserting a new row. The admin form always
+    // submits the full bank field set, so this overwrites rather than
+    // COALESCEs iban/routing_number/account_number — otherwise switching a
+    // brand's country would leave a stale IBAN sitting next to a routing
+    // number instead of clearing it.
+    if (
+      body.account_holder_name !== undefined ||
+      body.iban !== undefined ||
+      body.routing_number !== undefined ||
+      body.account_number !== undefined ||
+      body.bank_name !== undefined
+    ) {
+      const accountHolderName = body.account_holder_name || null;
+      const iban = body.iban || null;
+      const routingNumber = body.routing_number || null;
+      const accountNumber = body.account_number || null;
+      const bankName = body.bank_name || null;
+
       const { rows: existing } = await client.query(
         'SELECT id FROM brand_bank_accounts WHERE brand_id = $1 AND is_active = true ORDER BY created_at DESC LIMIT 1',
         [id]
@@ -184,16 +215,17 @@ export async function PATCH(request, { params }) {
         await client.query(
           `UPDATE brand_bank_accounts
            SET account_holder_name = COALESCE($1, account_holder_name),
-               iban = COALESCE($2, iban),
-               bank_name = COALESCE($3, bank_name)
-           WHERE id = $4`,
-          [body.account_holder_name || null, body.iban || null, body.bank_name || null, existing[0].id]
+               iban = $2, routing_number = $3, account_number = $4,
+               bank_name = COALESCE($5, bank_name)
+           WHERE id = $6`,
+          [accountHolderName, iban, routingNumber, accountNumber, bankName, existing[0].id]
         );
-      } else if (body.account_holder_name && body.iban) {
+      } else if (accountHolderName && (iban || (routingNumber && accountNumber))) {
         await client.query(
-          `INSERT INTO brand_bank_accounts (brand_id, account_holder_name, iban, bank_name)
-           VALUES ($1, $2, $3, $4)`,
-          [id, body.account_holder_name, body.iban, body.bank_name || null]
+          `INSERT INTO brand_bank_accounts
+             (brand_id, account_holder_name, iban, routing_number, account_number, bank_name)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [id, accountHolderName, iban, routingNumber, accountNumber, bankName]
         );
       }
     }

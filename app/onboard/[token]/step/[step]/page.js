@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import WizardShell from '../../../../../components/wizard/WizardShell.jsx';
 import StepWelcome from '../../../../../components/wizard/StepWelcome.jsx';
 import StepBrandIdentity from '../../../../../components/wizard/StepBrandIdentity.jsx';
@@ -10,12 +10,16 @@ import StepLegalEntity from '../../../../../components/wizard/StepLegalEntity.js
 import StepOperations from '../../../../../components/wizard/StepOperations.jsx';
 import StepBankDetails from '../../../../../components/wizard/StepBankDetails.jsx';
 import StepContract from '../../../../../components/wizard/StepContract.jsx';
+import StepPlatformConnect from '../../../../../components/wizard/StepPlatformConnect.jsx';
+import StepProductSync from '../../../../../components/wizard/StepProductSync.jsx';
 import StepPlaceholder from '../../../../../components/wizard/StepPlaceholder.jsx';
 
 export default function OnboardStepPage() {
   const { token, step: stepParam } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const step = Number(stepParam);
+  const connectError = searchParams.get('error');
 
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState('');
@@ -72,32 +76,31 @@ export default function OnboardStepPage() {
       content = <StepContactInfo initialData={payload.data} onSuccess={onSuccess} />;
       break;
     case 4:
-      content = <StepLegalEntity initialData={payload.data} onSuccess={onSuccess} />;
+      content = <StepLegalEntity initialData={payload.data} country={payload.country} onSuccess={onSuccess} />;
       break;
     case 5:
       content = <StepOperations initialData={payload.data} onSuccess={onSuccess} />;
       break;
     case 6:
-      content = <StepBankDetails initialData={payload.data} onSuccess={onSuccess} />;
+      content = <StepBankDetails initialData={payload.data} country={payload.country} onSuccess={onSuccess} />;
       break;
     case 7:
       content = <StepContract payload={payload} onSuccess={onSuccess} onRefresh={load} />;
       break;
     case 8:
       content = (
-        <StepPlaceholder
-          title="Connect your store"
-          message="Your contract is signed — thank you. Connecting Shopify is being set up and Ladiesse will reach out shortly to finish this step with you."
-        />
+        <>
+          {connectError && (
+            <div className="login-error" style={{ marginBottom: 16 }}>
+              We couldn't connect to Shopify. Please check the domain and try again.
+            </div>
+          )}
+          <StepPlatformConnect payload={payload} />
+        </>
       );
       break;
     case 9:
-      content = (
-        <StepPlaceholder
-          title="Product sync"
-          message="Once your store is connected, we'll pull in your catalogue automatically."
-        />
-      );
+      content = <StepProductSync payload={payload} onSuccess={onSuccess} />;
       break;
     case 10:
       content = (

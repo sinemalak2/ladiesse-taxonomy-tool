@@ -1,12 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { step6Schema } from '../../lib/brandValidation.js';
+import { makeStep6Schema } from '../../lib/brandValidation.js';
 
-export default function StepBankDetails({ initialData, onSuccess }) {
+export default function StepBankDetails({ initialData, country, onSuccess }) {
+  const isUS = country === 'US';
+  const schema = makeStep6Schema(country);
+
   const [form, setForm] = useState({
     account_holder_name: initialData.account_holder_name || '',
     iban: initialData.iban || '',
+    routing_number: initialData.routing_number || '',
+    account_number: initialData.account_number || '',
     bank_name: initialData.bank_name || '',
   });
   const [fieldErrors, setFieldErrors] = useState({});
@@ -23,7 +28,7 @@ export default function StepBankDetails({ initialData, onSuccess }) {
     e.preventDefault();
     setError('');
 
-    const parsed = step6Schema.safeParse(form);
+    const parsed = schema.safeParse(form);
     if (!parsed.success) {
       setFieldErrors(parsed.error.flatten().fieldErrors);
       return;
@@ -64,17 +69,36 @@ export default function StepBankDetails({ initialData, onSuccess }) {
         {err('account_holder_name') && <span className="field-error">{err('account_holder_name')}</span>}
       </div>
 
-      <div className="field-row">
+      {isUS ? (
+        <div className="field-row">
+          <div className="field-group">
+            <label htmlFor="routing_number">Routing number</label>
+            <input
+              id="routing_number"
+              placeholder="021000021"
+              value={form.routing_number}
+              onChange={set('routing_number')}
+            />
+            {err('routing_number') && <span className="field-error">{err('routing_number')}</span>}
+          </div>
+          <div className="field-group">
+            <label htmlFor="account_number">Account number</label>
+            <input id="account_number" value={form.account_number} onChange={set('account_number')} />
+            {err('account_number') && <span className="field-error">{err('account_number')}</span>}
+          </div>
+        </div>
+      ) : (
         <div className="field-group">
           <label htmlFor="iban">IBAN</label>
           <input id="iban" placeholder="TR..." value={form.iban} onChange={set('iban')} />
           {err('iban') && <span className="field-error">{err('iban')}</span>}
         </div>
-        <div className="field-group">
-          <label htmlFor="bank_name">Bank name</label>
-          <input id="bank_name" value={form.bank_name} onChange={set('bank_name')} />
-          {err('bank_name') && <span className="field-error">{err('bank_name')}</span>}
-        </div>
+      )}
+
+      <div className="field-group">
+        <label htmlFor="bank_name">Bank name</label>
+        <input id="bank_name" value={form.bank_name} onChange={set('bank_name')} />
+        {err('bank_name') && <span className="field-error">{err('bank_name')}</span>}
       </div>
 
       {error && <div className="login-error">{error}</div>}

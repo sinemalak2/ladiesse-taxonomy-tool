@@ -23,11 +23,15 @@ function statusLabel(status) {
 
 export default function BrandsList({ showTaxonomyNav }) {
   const [brands, setBrands] = useState(null);
+  const [ladiesseConnection, setLadiesseConnection] = useState(null);
 
   useEffect(() => {
     fetch('/api/brands')
       .then((res) => res.json())
       .then((json) => setBrands(json.brands));
+    fetch('/api/admin/ladiesse-shopify/status')
+      .then((res) => res.json())
+      .then((json) => setLadiesseConnection(json.connection));
   }, []);
 
   function handleStatusChange(brandId, newStatus) {
@@ -56,6 +60,24 @@ export default function BrandsList({ showTaxonomyNav }) {
           Add Brand
         </Link>
       </div>
+
+      {ladiesseConnection !== null && (
+        <div className="form-card" style={{ marginBottom: 24 }}>
+          <div className="section-heading">La-diesse's own Shopify connection</div>
+          <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+            <div className="status-text">
+              {ladiesseConnection
+                ? `Connected to ${ladiesseConnection.shop_domain} · ${ladiesseConnection.status}`
+                : 'Not connected yet — needed before any brand catalogue can be pushed into la-diesse.myshopify.com'}
+            </div>
+            {(!ladiesseConnection || ladiesseConnection.status !== 'active') && (
+              <a href="/api/admin/ladiesse-shopify/install" className="btn btn-gold">
+                Connect
+              </a>
+            )}
+          </div>
+        </div>
+      )}
 
       {brands === null ? (
         <div className="status-text">Loading…</div>

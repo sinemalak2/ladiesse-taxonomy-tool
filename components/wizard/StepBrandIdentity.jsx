@@ -1,12 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { step2Schema, CATEGORY_OPTIONS } from '../../lib/brandValidation.js';
+import { step2Schema, CATEGORY_OPTIONS, COUNTRY_OPTIONS } from '../../lib/brandValidation.js';
+
+const COUNTRY_LABELS = { TR: 'Turkey', US: 'United States' };
 
 export default function StepBrandIdentity({ initialData, onSuccess }) {
   const [form, setForm] = useState({
     brand_name: initialData.brand_name || '',
     category: initialData.category || '',
+    country: initialData.country || 'TR',
     website_url: initialData.website_url || '',
     instagram_handle: initialData.instagram_handle || '',
   });
@@ -75,6 +78,20 @@ export default function StepBrandIdentity({ initialData, onSuccess }) {
           </select>
           {err('category') && <span className="field-error">{err('category')}</span>}
         </div>
+        <div className="field-group">
+          <label htmlFor="country">Country</label>
+          <select id="country" value={form.country} onChange={set('country')}>
+            {COUNTRY_OPTIONS.map((c) => (
+              <option key={c} value={c}>
+                {COUNTRY_LABELS[c]}
+              </option>
+            ))}
+          </select>
+          {err('country') && <span className="field-error">{err('country')}</span>}
+        </div>
+      </div>
+
+      <div className="field-row">
         <div className="field-group">
           <label htmlFor="instagram_handle">Instagram</label>
           <input

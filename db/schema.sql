@@ -108,13 +108,15 @@ CREATE TABLE IF NOT EXISTS brands (
   category                  TEXT,                          -- e.g. 'ready-to-wear', 'accessories'
   website_url               TEXT,
   instagram_handle          TEXT,
+  country                   TEXT NOT NULL DEFAULT 'TR'
+                             CHECK (country IN ('TR','US')), -- drives which tax ID / bank fields apply
 
   -- Legal entity
   legal_company_name        TEXT,                          -- Marka Şirket Ünvanı — collected at Stage 2
   legal_address             TEXT,                          -- Marka Şirket Adresi — collected at Stage 2
-  tax_id                    TEXT,                          -- Vergi Kimlik No (VKN) — collected at Stage 2
-  tax_office                TEXT,                          -- Vergi Dairesi
-  trade_registry_no         TEXT,                          -- Ticaret Sicil No (optional)
+  tax_id                    TEXT,                          -- VKN/TCKN (TR) or EIN (US) — collected at Stage 2
+  tax_office                TEXT,                          -- Vergi Dairesi — TR only
+  trade_registry_no         TEXT,                          -- Ticaret Sicil No (optional) — TR only
 
   -- Operations
   warehouse_address         TEXT,                          -- Marka Depo Adresi — collected at Stage 4
@@ -156,6 +158,10 @@ CREATE TABLE IF NOT EXISTS brands (
 -- already had `brands` from before the onboarding wizard existed.
 ALTER TABLE brands ADD COLUMN IF NOT EXISTS onboarding_token TEXT UNIQUE;
 ALTER TABLE brands ADD COLUMN IF NOT EXISTS current_step SMALLINT NOT NULL DEFAULT 1;
+ALTER TABLE brands ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'TR';
+
+ALTER TABLE brands DROP CONSTRAINT IF EXISTS brands_country_check;
+ALTER TABLE brands ADD CONSTRAINT brands_country_check CHECK (country IN ('TR','US'));
 
 -- Commission is fixed platform-wide at 40%, not something brands negotiate
 -- individually — enforced here (not just in the API) so it can't drift via
@@ -202,14 +208,30 @@ CREATE TABLE IF NOT EXISTS brand_bank_accounts (
   brand_id             UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
 
   account_holder_name  TEXT NOT NULL,
-  iban                 TEXT NOT NULL,
+  iban                 TEXT,                                -- TR brands
+  routing_number       TEXT,                                -- US brands (ABA routing number)
+  account_number       TEXT,                                -- US brands
   bank_name            TEXT,
   is_active            BOOLEAN NOT NULL DEFAULT true,
 
-  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT brand_bank_accounts_has_payout_method
+    CHECK (iban IS NOT NULL OR (routing_number IS NOT NULL AND account_number IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_brand_bank_accounts_brand_id ON brand_bank_accounts(brand_id);
+
+-- ADD COLUMN IF NOT EXISTS + relax NOT NULL so this is safe to re-run
+-- against a database that already had this table with iban as required
+-- (from before US brands were supported).
+ALTER TABLE brand_bank_accounts ALTER COLUMN iban DROP NOT NULL;
+ALTER TABLE brand_bank_accounts ADD COLUMN IF NOT EXISTS routing_number TEXT;
+ALTER TABLE brand_bank_accounts ADD COLUMN IF NOT EXISTS account_number TEXT;
+
+ALTER TABLE brand_bank_accounts DROP CONSTRAINT IF EXISTS brand_bank_accounts_has_payout_method;
+ALTER TABLE brand_bank_accounts ADD CONSTRAINT brand_bank_accounts_has_payout_method
+  CHECK (iban IS NOT NULL OR (routing_number IS NOT NULL AND account_number IS NOT NULL));
 
 -- Onboarding wizard: one row per generated contract. Signed rows are never
 -- UPDATEd (only pdf_url is added after the fact) — renegotiation means
@@ -251,6 +273,7 @@ CREATE TABLE IF NOT EXISTS brand_platform_connections (
   shop_domain      TEXT NOT NULL,
   access_token_ref TEXT NOT NULL,                -- AES-256-GCM ciphertext, never a raw token
   scope            TEXT,                         -- comma-separated scopes Shopify granted
+  currency         TEXT,                         -- this store's currencyCode, queried at connect time — drives price conversion on import
 
   status           TEXT NOT NULL DEFAULT 'active'
                    CHECK (status IN ('active','revoked')),
@@ -261,6 +284,8 @@ CREATE TABLE IF NOT EXISTS brand_platform_connections (
 );
 
 CREATE INDEX IF NOT EXISTS idx_brand_platform_connections_brand_id ON brand_platform_connections(brand_id);
+
+ALTER TABLE brand_platform_connections ADD COLUMN IF NOT EXISTS currency TEXT;
 
 -- Onboarding wizard: brand product catalogue synced from their own Shopify
 -- store. Deliberately separate from the top-level `products` table (Ladiesse's
@@ -278,13 +303,33 @@ CREATE TABLE IF NOT EXISTS brand_products (
   product_type           TEXT,
   vendor                 TEXT,
   status                 TEXT,
+  options                JSONB,                  -- [{name:'Size', values:['S','M']}] — option definitions, needed to rebuild variants on import
+  image_urls             JSONB,                  -- all product images, ordered — needed to rebuild the product-level `files` list on import
+  tags                   JSONB,                  -- ['tag1','tag2'] — carried through verbatim to the imported la-diesse product
+  category_gid           TEXT,                   -- Shopify's Standard Product Taxonomy node ID — canonical/shared across all shops, so reusable as-is on import
+  category_name          TEXT,                   -- human-readable, for display only
+  metafields             JSONB,                   -- [{namespace,key,value,type}] — the brand's own custom fields, carried through on import
   raw_shopify_data       JSONB,
   synced_at              TIMESTAMPTZ DEFAULT now(),
+
+  -- Push-to-la-diesse.myshopify.com import tracking — lets re-imports update
+  -- the existing product instead of creating a duplicate every sync.
+  imported_shopify_product_gid TEXT,
+  imported_at                  TIMESTAMPTZ,
 
   UNIQUE (brand_id, shopify_product_gid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_brand_products_brand_id ON brand_products(brand_id);
+
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS options JSONB;
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS image_urls JSONB;
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS tags JSONB;
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS category_gid TEXT;
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS category_name TEXT;
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS metafields JSONB;
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS imported_shopify_product_gid TEXT;
+ALTER TABLE brand_products ADD COLUMN IF NOT EXISTS imported_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS brand_product_variants (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -298,11 +343,21 @@ CREATE TABLE IF NOT EXISTS brand_product_variants (
   inventory_quantity  INT DEFAULT 0,
   inventory_item_gid  TEXT,                      -- for matching inventory_levels/update webhooks
   image_url           TEXT,
+  option_values       JSONB,                     -- [{name:'Size', value:'M'}, {name:'Color', value:'Black'}]
+  weight_value        NUMERIC,                   -- for real shipping-rate calculation on import
+  weight_unit         TEXT,                      -- e.g. 'GRAMS', 'KILOGRAMS', 'POUNDS', 'OUNCES'
+
+  imported_shopify_variant_gid TEXT,
 
   UNIQUE (brand_product_id, shopify_variant_gid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_brand_product_variants_brand_product_id ON brand_product_variants(brand_product_id);
+
+ALTER TABLE brand_product_variants ADD COLUMN IF NOT EXISTS option_values JSONB;
+ALTER TABLE brand_product_variants ADD COLUMN IF NOT EXISTS weight_value NUMERIC;
+ALTER TABLE brand_product_variants ADD COLUMN IF NOT EXISTS weight_unit TEXT;
+ALTER TABLE brand_product_variants ADD COLUMN IF NOT EXISTS imported_shopify_variant_gid TEXT;
 
 -- Onboarding wizard: audit log for each product sync attempt (initial sync
 -- at Step 9, plus any later manual/cron re-syncs).
@@ -327,3 +382,60 @@ CREATE TABLE IF NOT EXISTS product_sync_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_sync_jobs_brand_id ON product_sync_jobs(brand_id);
+
+-- Audit log for pushing a brand's synced catalogue INTO la-diesse.myshopify.com
+-- as draft products (vendor = brand name). Distinct from product_sync_jobs
+-- (which tracks pulling FROM the brand's own store into our DB) since the
+-- two steps have entirely different failure domains — a brand's token being
+-- revoked breaks the pull, while an la-diesse-side or FX-lookup problem
+-- breaks only the push.
+CREATE TABLE IF NOT EXISTS product_import_jobs (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_id           UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+
+  status             TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending','running','completed','failed')),
+  triggered_by       TEXT NOT NULL DEFAULT 'wizard'
+                     CHECK (triggered_by IN ('wizard','manual','cron')),
+
+  products_created   INT DEFAULT 0,
+  products_updated   INT DEFAULT 0,
+
+  -- Recorded once per job (the rate is fetched once, not per product) so
+  -- it's auditable after the fact which rate a given import actually used.
+  fx_from_currency   TEXT,
+  fx_to_currency     TEXT,
+  fx_rate            NUMERIC,
+  fx_fetched_at      TIMESTAMPTZ,
+
+  error_message      TEXT,
+  started_at         TIMESTAMPTZ,
+  completed_at       TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Ladiesse's OWN connection to la-diesse.myshopify.com via App B (the
+-- per-brand OAuth app) — NOT App A's client-credentials grant. Needed
+-- because lib/brandProductImport.js pushes brand catalogues into
+-- la-diesse's own store using App B end-to-end, so App B needs a real
+-- installed-token for la-diesse itself, gotten the exact same way a
+-- brand connects (authorization-code OAuth), just triggered by staff
+-- once rather than by a brand through the wizard. Deliberately separate
+-- from brand_platform_connections (brand_id there is NOT NULL — la-diesse
+-- isn't a brand) rather than adding a nullable-brand-id special case to
+-- that table's semantics. In practice this table holds at most one row;
+-- not enforced by a constraint, same convention as brand_platform_connections
+-- (most-recent-active-row is the source of truth).
+CREATE TABLE IF NOT EXISTS ladiesse_shopify_connection (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  shop_domain      TEXT NOT NULL,
+  access_token_ref TEXT NOT NULL,                -- AES-256-GCM ciphertext, never a raw token
+  scope            TEXT,
+
+  status           TEXT NOT NULL DEFAULT 'active'
+                   CHECK (status IN ('active','revoked')),
+  connected_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at       TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_import_jobs_brand_id ON product_import_jobs(brand_id);

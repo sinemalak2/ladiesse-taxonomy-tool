@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getPool, query } from '../../../../../../lib/db.js';
 import { BRAND_SESSION_COOKIE_NAME, verifyBrandSessionToken } from '../../../../../../lib/brandAuth.js';
-import { STEP_SCHEMAS } from '../../../../../../lib/brandValidation.js';
+import { STEP_SCHEMAS, makeStep4Schema, makeStep6Schema } from '../../../../../../lib/brandValidation.js';
 import { generateContractHtml } from '../../../../../../lib/contractTemplate.js';
+import { decryptToken } from '../../../../../../lib/brandTokenEncryption.js';
+import { syncBrandProducts } from '../../../../../../lib/brandSync.js';
+import { importBrandProductsToLadiesse } from '../../../../../../lib/brandProductImport.js';
 
 async function getBrandSession(request) {
   const token = request.cookies.get(BRAND_SESSION_COOKIE_NAME)?.value;
@@ -25,7 +28,7 @@ export async function GET(request, { params }) {
   const { brandId } = session;
 
   const { rows: brandRows } = await query(
-    `SELECT brand_name, category, website_url, instagram_handle,
+    `SELECT brand_name, category, country, website_url, instagram_handle,
             legal_company_name, legal_address, tax_id, tax_office, trade_registry_no,
             warehouse_address, avg_processing_days, shipping_carrier,
             commission_percentage, payout_frequency,
@@ -48,6 +51,7 @@ export async function GET(request, { params }) {
         data: {
           brand_name: brand.brand_name || '',
           category: brand.category || '',
+          country: brand.country || 'TR',
           website_url: brand.website_url || '',
           instagram_handle: brand.instagram_handle || '',
         },
@@ -74,6 +78,7 @@ export async function GET(request, { params }) {
     case 4:
       return NextResponse.json({
         ...base,
+        country: brand.country || 'TR',
         data: {
           legal_company_name: brand.legal_company_name || '',
           legal_address: brand.legal_address || '',
@@ -95,16 +100,20 @@ export async function GET(request, { params }) {
 
     case 6: {
       const { rows } = await query(
-        `SELECT account_holder_name, iban, bank_name FROM brand_bank_accounts
-         WHERE brand_id = $1 AND is_active = true ORDER BY created_at DESC LIMIT 1`,
+        `SELECT account_holder_name, iban, routing_number, account_number, bank_name
+         FROM brand_bank_accounts WHERE brand_id = $1 AND is_active = true
+         ORDER BY created_at DESC LIMIT 1`,
         [brandId]
       );
       const b = rows[0] || {};
       return NextResponse.json({
         ...base,
+        country: brand.country || 'TR',
         data: {
           account_holder_name: b.account_holder_name || '',
           iban: b.iban || '',
+          routing_number: b.routing_number || '',
+          account_number: b.account_number || '',
           bank_name: b.bank_name || '',
         },
       });
@@ -159,9 +168,66 @@ export async function GET(request, { params }) {
       });
     }
 
-    case 8:
-    case 9:
-      return NextResponse.json({ ...base, comingSoon: true });
+    case 8: {
+      const { rows: connRows } = await query(
+        `SELECT shop_domain, status FROM brand_platform_connections
+         WHERE brand_id = $1 AND platform = 'shopify' LIMIT 1`,
+        [brandId]
+      );
+      return NextResponse.json({ ...base, connection: connRows[0] || null });
+    }
+
+    case 9: {
+      const { rows: jobRows } = await query(
+        `SELECT id, status, platform_connection_id, products_created, products_updated, error_message, completed_at
+         FROM product_sync_jobs WHERE brand_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [brandId]
+      );
+      let job = jobRows[0] || null;
+
+      // Kick off the actual sync the first time this step is loaded after
+      // the job was created 'pending' by the OAuth callback — deliberately
+      // not run from the callback itself (see that route's comment) since a
+      // full catalogue sync can outlast a redirect. This request blocks
+      // until the sync finishes; the wizard's poll interval just re-fetches
+      // this same GET, so it naturally shows 'completed' once this returns.
+      if (job && job.status === 'pending') {
+        const { rows: connRows } = await query(
+          'SELECT shop_domain, access_token_ref FROM brand_platform_connections WHERE id = $1',
+          [job.platform_connection_id]
+        );
+        const connection = connRows[0];
+        if (connection) {
+          try {
+            const summary = await syncBrandProducts({
+              brandId,
+              platformConnectionId: job.platform_connection_id,
+              accessToken: decryptToken(connection.access_token_ref),
+              shopDomain: connection.shop_domain,
+              jobId: job.id,
+            });
+            job = { ...job, status: 'completed', products_created: summary.created, products_updated: summary.updated };
+
+            // Pushing the pulled catalogue into la-diesse.myshopify.com is
+            // purely an internal Ladiesse operation the brand never sees or
+            // needs to act on — awaited (serverless functions can be frozen
+            // right after a response is sent, so this can't be a true
+            // fire-and-forget) but failures here (e.g. a missing Shopify
+            // scope on our own store's app) are swallowed from the brand's
+            // response and only surfaced to staff via the admin page.
+            try {
+              await importBrandProductsToLadiesse({ brandId });
+            } catch (err) {
+              console.error('Import to la-diesse.myshopify.com failed:', err);
+            }
+          } catch (err) {
+            job = { ...job, status: 'failed', error_message: err.message };
+          }
+        }
+      }
+
+      return NextResponse.json({ ...base, job });
+    }
 
     case 10:
       return NextResponse.json({ ...base, data: {} });
@@ -181,7 +247,7 @@ export async function PATCH(request, { params }) {
   const { brandId } = session;
 
   const { rows: brandRows } = await query(
-    'SELECT current_step, onboarding_status FROM brands WHERE id = $1',
+    'SELECT current_step, onboarding_status, country FROM brands WHERE id = $1',
     [brandId]
   );
   if (brandRows.length === 0) return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
@@ -202,7 +268,13 @@ export async function PATCH(request, { params }) {
     return NextResponse.json({ error: 'This step is not available yet' }, { status: 501 });
   }
 
-  const schema = STEP_SCHEMAS[step];
+  // Steps 4 and 6 validate differently depending on the brand's country
+  // (VKN/TCKN vs EIN, IBAN vs routing/account) — everything else uses a
+  // fixed schema.
+  const schema =
+    step === 4 ? makeStep4Schema(currentBrand.country)
+    : step === 6 ? makeStep6Schema(currentBrand.country)
+    : STEP_SCHEMAS[step];
   const body = await request.json().catch(() => ({}));
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
@@ -225,10 +297,18 @@ export async function PATCH(request, { params }) {
 
       case 2:
         await client.query(
-          `UPDATE brands SET brand_name = $1, category = $2, website_url = $3, instagram_handle = $4,
-             current_step = GREATEST(current_step, $5), updated_at = now()
-           WHERE id = $6`,
-          [data.brand_name, data.category, data.website_url || null, data.instagram_handle || null, newStep, brandId]
+          `UPDATE brands SET brand_name = $1, category = $2, country = $3, website_url = $4, instagram_handle = $5,
+             current_step = GREATEST(current_step, $6), updated_at = now()
+           WHERE id = $7`,
+          [
+            data.brand_name,
+            data.category,
+            data.country,
+            data.website_url || null,
+            data.instagram_handle || null,
+            newStep,
+            brandId,
+          ]
         );
         break;
 
@@ -267,7 +347,7 @@ export async function PATCH(request, { params }) {
             data.legal_company_name,
             data.legal_address,
             data.tax_id,
-            data.tax_office,
+            data.tax_office || null,
             data.trade_registry_no || null,
             newStep,
             brandId,
@@ -285,20 +365,30 @@ export async function PATCH(request, { params }) {
         break;
 
       case 6: {
+        // Whichever fields this country's schema didn't produce are
+        // explicitly nulled out, so switching a brand's country later
+        // doesn't leave a stale IBAN sitting alongside a routing number.
+        const iban = data.iban ?? null;
+        const routingNumber = data.routing_number ?? null;
+        const accountNumber = data.account_number ?? null;
+
         const { rows: existing } = await client.query(
           `SELECT id FROM brand_bank_accounts WHERE brand_id = $1 AND is_active = true ORDER BY created_at DESC LIMIT 1`,
           [brandId]
         );
         if (existing.length > 0) {
           await client.query(
-            `UPDATE brand_bank_accounts SET account_holder_name = $1, iban = $2, bank_name = $3 WHERE id = $4`,
-            [data.account_holder_name, data.iban, data.bank_name, existing[0].id]
+            `UPDATE brand_bank_accounts
+             SET account_holder_name = $1, iban = $2, routing_number = $3, account_number = $4, bank_name = $5
+             WHERE id = $6`,
+            [data.account_holder_name, iban, routingNumber, accountNumber, data.bank_name, existing[0].id]
           );
         } else {
           await client.query(
-            `INSERT INTO brand_bank_accounts (brand_id, account_holder_name, iban, bank_name)
-             VALUES ($1, $2, $3, $4)`,
-            [brandId, data.account_holder_name, data.iban, data.bank_name]
+            `INSERT INTO brand_bank_accounts
+               (brand_id, account_holder_name, iban, routing_number, account_number, bank_name)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [brandId, data.account_holder_name, iban, routingNumber, accountNumber, data.bank_name]
           );
         }
         await client.query('UPDATE brands SET current_step = GREATEST(current_step, $1), updated_at = now() WHERE id = $2', [

@@ -3,10 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { COUNTRY_OPTIONS } from '../../../lib/brandValidation.js';
 
 const PAYOUT_FREQUENCIES = ['weekly', 'biweekly', 'monthly'];
+const COUNTRY_LABELS = { TR: 'Turkey', US: 'United States' };
 
 const EDITABLE_FIELDS = [
+  'country',
   'legal_company_name',
   'legal_address',
   'tax_id',
@@ -19,6 +22,8 @@ const EDITABLE_FIELDS = [
   'notes',
   'account_holder_name',
   'iban',
+  'routing_number',
+  'account_number',
   'bank_name',
 ];
 
@@ -39,6 +44,8 @@ export default function BrandDetailPage() {
   const [savedAt, setSavedAt] = useState(null);
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
 
   useEffect(() => {
     fetch(`/api/brands/${id}`)
@@ -114,6 +121,23 @@ export default function BrandDetailPage() {
     }
   }
 
+  async function handleSyncNow() {
+    setSyncing(true);
+    setSyncError('');
+    try {
+      const res = await fetch(`/api/brands/${id}/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+
+      const refreshed = await fetch(`/api/brands/${id}`).then((r) => r.json());
+      if (!refreshed.error) setBrand(refreshed.brand);
+    } catch (err) {
+      setSyncError(err.message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   if (error && !brand) {
     return (
       <div className="page-shell">
@@ -149,13 +173,25 @@ export default function BrandDetailPage() {
 
       <form className="form-card" onSubmit={handleSave}>
         <div className="section-heading">Legal entity</div>
-        <div className="field-group">
-          <label htmlFor="legal_company_name">Legal company name</label>
-          <input
-            id="legal_company_name"
-            value={form.legal_company_name}
-            onChange={set('legal_company_name')}
-          />
+        <div className="field-row">
+          <div className="field-group">
+            <label htmlFor="legal_company_name">Legal company name</label>
+            <input
+              id="legal_company_name"
+              value={form.legal_company_name}
+              onChange={set('legal_company_name')}
+            />
+          </div>
+          <div className="field-group">
+            <label htmlFor="country">Country</label>
+            <select id="country" value={form.country} onChange={set('country')}>
+              {COUNTRY_OPTIONS.map((c) => (
+                <option key={c} value={c}>
+                  {COUNTRY_LABELS[c]}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="field-group">
           <label htmlFor="legal_address">Legal address</label>
@@ -163,13 +199,15 @@ export default function BrandDetailPage() {
         </div>
         <div className="field-row">
           <div className="field-group">
-            <label htmlFor="tax_id">Tax ID (VKN)</label>
+            <label htmlFor="tax_id">{form.country === 'US' ? 'EIN' : 'Tax ID (VKN/TCKN)'}</label>
             <input id="tax_id" value={form.tax_id} onChange={set('tax_id')} />
           </div>
-          <div className="field-group">
-            <label htmlFor="tax_office">Tax office</label>
-            <input id="tax_office" value={form.tax_office} onChange={set('tax_office')} />
-          </div>
+          {form.country !== 'US' && (
+            <div className="field-group">
+              <label htmlFor="tax_office">Tax office</label>
+              <input id="tax_office" value={form.tax_office} onChange={set('tax_office')} />
+            </div>
+          )}
         </div>
         <div className="field-group">
           <label htmlFor="trade_registry_no">Trade registry no</label>
@@ -233,15 +271,26 @@ export default function BrandDetailPage() {
             onChange={set('account_holder_name')}
           />
         </div>
-        <div className="field-row">
+        {form.country === 'US' ? (
+          <div className="field-row">
+            <div className="field-group">
+              <label htmlFor="routing_number">Routing number</label>
+              <input id="routing_number" value={form.routing_number} onChange={set('routing_number')} />
+            </div>
+            <div className="field-group">
+              <label htmlFor="account_number">Account number</label>
+              <input id="account_number" value={form.account_number} onChange={set('account_number')} />
+            </div>
+          </div>
+        ) : (
           <div className="field-group">
             <label htmlFor="iban">IBAN</label>
             <input id="iban" value={form.iban} onChange={set('iban')} />
           </div>
-          <div className="field-group">
-            <label htmlFor="bank_name">Bank name</label>
-            <input id="bank_name" value={form.bank_name} onChange={set('bank_name')} />
-          </div>
+        )}
+        <div className="field-group">
+          <label htmlFor="bank_name">Bank name</label>
+          <input id="bank_name" value={form.bank_name} onChange={set('bank_name')} />
         </div>
 
         <div className="section-heading">Internal notes</div>
@@ -326,16 +375,38 @@ export default function BrandDetailPage() {
             : 'Not connected'}
         </div>
 
-        <div className="section-heading">Last product sync</div>
+        <div className="section-heading">Catalogue sync (pull from brand's store)</div>
+        <div className="field-row" style={{ alignItems: 'center', gap: 12 }}>
+          <div className="status-text">
+            {brand.sync_status
+              ? `${brand.sync_status}${brand.sync_completed_at ? ' · ' + new Date(brand.sync_completed_at).toLocaleString() : ''}${
+                  brand.sync_status === 'completed'
+                    ? ` · ${brand.sync_products_created} created, ${brand.sync_products_updated} updated`
+                    : ''
+                }`
+              : 'No sync yet'}
+          </div>
+          {brand.platform_status === 'active' && (
+            <button type="button" className="btn" onClick={handleSyncNow} disabled={syncing}>
+              {syncing ? 'Syncing…' : 'Sync now'}
+            </button>
+          )}
+        </div>
+        {syncError && <div className="login-error">{syncError}</div>}
+
+        <div className="section-heading">Import into la-diesse.myshopify.com (draft products)</div>
         <div className="status-text">
-          {brand.sync_status
-            ? `${brand.sync_status}${brand.sync_completed_at ? ' · ' + new Date(brand.sync_completed_at).toLocaleString() : ''}${
-                brand.sync_status === 'completed'
-                  ? ` · ${brand.sync_products_created} created, ${brand.sync_products_updated} updated`
+          {brand.import_status
+            ? `${brand.import_status}${brand.import_completed_at ? ' · ' + new Date(brand.import_completed_at).toLocaleString() : ''}${
+                brand.import_status === 'completed'
+                  ? ` · ${brand.import_products_created} created, ${brand.import_products_updated} updated`
                   : ''
               }`
-            : 'No sync yet'}
+            : 'No import yet'}
         </div>
+        {brand.import_status === 'failed' && brand.import_error_message && (
+          <div className="login-error">{brand.import_error_message}</div>
+        )}
       </div>
     </div>
   );

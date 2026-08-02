@@ -30,11 +30,30 @@ export async function middleware(request) {
 
   // Brand onboarding wizard — its own session (ladiesse_brand_session),
   // entirely separate from the staff cookie below. A brand's link never
-  // grants staff access and vice versa. Note: Shopify's OAuth callback and
-  // webhook endpoints (added in later phases) will need their own
-  // pass-through entries here, since Shopify calls them with no session.
+  // grants staff access and vice versa.
   if (pathname === '/api/onboard/session') {
     return NextResponse.next(); // this route establishes the session itself
+  }
+
+  // Shopify redirects the brand's browser here after OAuth approval — no
+  // session cookie is relied on for this hop (brandId travels in the
+  // signed `state` param instead; see lib/brandShopifyAuth.js). The route
+  // itself verifies Shopify's callback HMAC before trusting anything.
+  if (pathname === '/api/onboard/shopify/callback') {
+    return NextResponse.next();
+  }
+
+  // Shopify calls these server-to-server with its own HMAC signature on the
+  // raw body, not a browser session — the route itself verifies that.
+  if (pathname.startsWith('/api/webhooks/')) {
+    return NextResponse.next();
+  }
+
+  // Shopify redirects here after staff approves App B's install on
+  // la-diesse.myshopify.com itself — no session cookie for this hop either
+  // (same reasoning as the brand callback above), verified via signed state.
+  if (pathname === '/api/admin/ladiesse-shopify/callback') {
+    return NextResponse.next();
   }
 
   if (pathname.startsWith('/onboard/')) {

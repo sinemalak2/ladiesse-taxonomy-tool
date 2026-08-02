@@ -144,7 +144,7 @@ export default function BrandDetailPage() {
 
   async function handleDeleteProducts() {
     const ok = window.confirm(
-      `Delete all of ${brand.brand_name}'s products from la-diesse.myshopify.com? This cannot be undone.`
+      `Clear ${brand.brand_name}'s synced products from the database? This does not touch la-diesse.myshopify.com or the brand's own store — just our local copy, so a future sync starts clean.`
     );
     if (!ok) return;
 
@@ -154,8 +154,7 @@ export default function BrandDetailPage() {
       const res = await fetch(`/api/brands/${id}/delete-products`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Delete failed');
-      const failedNote = data.errors.length > 0 ? ` (${data.errors.length} failed — see logs)` : '';
-      setDeleteProductsMessage(`Deleted ${data.deleted} of ${data.total} product(s).${failedNote}`);
+      setDeleteProductsMessage(`Cleared ${data.deleted} product(s) from the database.`);
 
       const refreshed = await fetch(`/api/brands/${id}`).then((r) => r.json());
       if (!refreshed.error) setBrand(refreshed.brand);
@@ -437,9 +436,9 @@ export default function BrandDetailPage() {
               {syncing ? 'Syncing…' : 'Sync now'}
             </button>
           )}
-          {brand.import_status && (
+          {brand.sync_status && (
             <button type="button" className="btn" onClick={handleDeleteProducts} disabled={deletingProducts}>
-              {deletingProducts ? 'Deleting…' : 'Delete products'}
+              {deletingProducts ? 'Clearing…' : 'Clear synced products'}
             </button>
           )}
         </div>

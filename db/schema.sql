@@ -191,12 +191,15 @@ CREATE TABLE IF NOT EXISTS brand_contacts (
   full_name       TEXT NOT NULL,              -- Marka Temsilci Adı Soyadı
   phone_number    TEXT NOT NULL,              -- Marka Temsilci Telefon Numarası (incl. country code)
   email           TEXT,
+  title           TEXT,                       -- signer's job title, e.g. "Founder & CEO" — used in the contract signature block
   role            TEXT NOT NULL DEFAULT 'primary'
                   CHECK (role IN ('primary','billing','operations','other')),
   is_primary      BOOLEAN NOT NULL DEFAULT true,
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE brand_contacts ADD COLUMN IF NOT EXISTS title TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_brand_contacts_brand_id ON brand_contacts(brand_id);
 

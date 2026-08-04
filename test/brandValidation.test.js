@@ -185,7 +185,7 @@ describe('makeStep6Schema (country-aware bank details)', () => {
 });
 
 describe('step3Schema (E.164 phone)', () => {
-  const base = { full_name: 'Test Rep', email: 'rep@example.com', role: 'primary' };
+  const base = { full_name: 'Test Rep', title: 'Founder & CEO', email: 'rep@example.com', role: 'primary' };
 
   test('accepts a properly formatted international number', () => {
     const result = step3Schema.safeParse({ ...base, phone_number: '+905551234567' });

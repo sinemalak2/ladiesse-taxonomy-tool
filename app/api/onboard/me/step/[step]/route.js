@@ -59,7 +59,7 @@ export async function GET(request, { params }) {
 
     case 3: {
       const { rows } = await query(
-        `SELECT full_name, phone_number, email, role FROM brand_contacts
+        `SELECT full_name, title, phone_number, email, role FROM brand_contacts
          WHERE brand_id = $1 ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
         [brandId]
       );
@@ -68,6 +68,7 @@ export async function GET(request, { params }) {
         ...base,
         data: {
           full_name: c.full_name || '',
+          title: c.title || '',
           phone_number: c.phone_number || '',
           email: c.email || '',
           role: c.role || 'primary',
@@ -148,12 +149,12 @@ export async function GET(request, { params }) {
       }
 
       const { rows: contactRows } = await query(
-        `SELECT full_name FROM brand_contacts WHERE brand_id = $1
+        `SELECT full_name, title FROM brand_contacts WHERE brand_id = $1
          ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
         [brandId]
       );
       const contractHtml = generateContractHtml(
-        { ...brand, rep_full_name: contactRows[0]?.full_name },
+        { ...brand, rep_full_name: contactRows[0]?.full_name, rep_title: contactRows[0]?.title },
         new Date()
       );
       return NextResponse.json({
@@ -319,14 +320,14 @@ export async function PATCH(request, { params }) {
         );
         if (existing.length > 0) {
           await client.query(
-            `UPDATE brand_contacts SET full_name = $1, phone_number = $2, email = $3, role = $4 WHERE id = $5`,
-            [data.full_name, data.phone_number, data.email, data.role, existing[0].id]
+            `UPDATE brand_contacts SET full_name = $1, title = $2, phone_number = $3, email = $4, role = $5 WHERE id = $6`,
+            [data.full_name, data.title, data.phone_number, data.email, data.role, existing[0].id]
           );
         } else {
           await client.query(
-            `INSERT INTO brand_contacts (brand_id, full_name, phone_number, email, role, is_primary)
-             VALUES ($1, $2, $3, $4, $5, true)`,
-            [brandId, data.full_name, data.phone_number, data.email, data.role]
+            `INSERT INTO brand_contacts (brand_id, full_name, title, phone_number, email, role, is_primary)
+             VALUES ($1, $2, $3, $4, $5, $6, true)`,
+            [brandId, data.full_name, data.title, data.phone_number, data.email, data.role]
           );
         }
         await client.query('UPDATE brands SET current_step = GREATEST(current_step, $1), updated_at = now() WHERE id = $2', [
@@ -405,14 +406,14 @@ export async function PATCH(request, { params }) {
           [brandId]
         );
         const { rows: contactRows } = await client.query(
-          `SELECT full_name FROM brand_contacts WHERE brand_id = $1
+          `SELECT full_name, title FROM brand_contacts WHERE brand_id = $1
            ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
           [brandId]
         );
         // Regenerated from the same inputs the brand was just shown in GET —
         // this is what gets snapshotted as the signed record.
         const contractHtml = generateContractHtml(
-          { ...brandFull[0], rep_full_name: contactRows[0]?.full_name },
+          { ...brandFull[0], rep_full_name: contactRows[0]?.full_name, rep_title: contactRows[0]?.title },
           new Date()
         );
 

@@ -6,6 +6,7 @@ import { step3Schema } from '../../lib/brandValidation.js';
 export default function StepContactInfo({ initialData, onSuccess }) {
   const [form, setForm] = useState({
     full_name: initialData.full_name || '',
+    title: initialData.title || '',
     phone_number: initialData.phone_number || '',
     email: initialData.email || '',
     role: initialData.role || 'primary',
@@ -58,6 +59,12 @@ export default function StepContactInfo({ initialData, onSuccess }) {
         <label htmlFor="full_name">Your full name</label>
         <input id="full_name" value={form.full_name} onChange={set('full_name')} autoFocus />
         {err('full_name') && <span className="field-error">{err('full_name')}</span>}
+      </div>
+
+      <div className="field-group">
+        <label htmlFor="title">Your title</label>
+        <input id="title" placeholder="Founder & CEO" value={form.title} onChange={set('title')} />
+        {err('title') && <span className="field-error">{err('title')}</span>}
       </div>
 
       <div className="field-row">

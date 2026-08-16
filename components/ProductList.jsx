@@ -10,6 +10,10 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [aiTaggingAll, setAiTaggingAll] = useState(false);
+  const [aiTagAllMessage, setAiTagAllMessage] = useState('');
+  const [publishingAll, setPublishingAll] = useState(false);
+  const [publishAllMessage, setPublishAllMessage] = useState('');
 
   const fetchProducts = useCallback(() => {
     setLoading(true);
@@ -98,6 +102,57 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
     }
   }
 
+  async function handleAiTagAll() {
+    setAiTaggingAll(true);
+    setAiTagAllMessage('Tagging...');
+    let tagged = 0;
+    let failed = 0;
+
+    try {
+      // Each call only tags a small batch (see /api/products/ai-tag-batch) so
+      // a full-catalog run stays inside Vercel's function timeout — loop here
+      // until nothing untagged is left.
+      for (;;) {
+        const res = await fetch('/api/products/ai-tag-batch', { method: 'POST' });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'AI tagging failed');
+
+        tagged += json.tagged.length;
+        failed += json.failed.length;
+        setAiTagAllMessage(`Tagged ${tagged}${failed ? `, ${failed} failed` : ''} — ${json.remaining} remaining...`);
+
+        if (json.remaining === 0 || (json.tagged.length === 0 && json.failed.length === 0)) break;
+      }
+      setAiTagAllMessage(`Done. Tagged ${tagged} product(s)${failed ? `, ${failed} failed` : ''}.`);
+      await fetchProducts();
+    } catch (err) {
+      setAiTagAllMessage(err.message);
+    } finally {
+      setAiTaggingAll(false);
+    }
+  }
+
+  async function handlePublishAll() {
+    const ok = window.confirm('Publish tags for every tagged product to Shopify now?');
+    if (!ok) return;
+
+    setPublishingAll(true);
+    setPublishAllMessage('Publishing...');
+    try {
+      const res = await fetch('/api/products/publish-all-to-shopify', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Bulk publish failed');
+      const failedNote = json.metafieldsFailed > 0 ? ` (${json.metafieldsFailed} failed — see logs)` : '';
+      setPublishAllMessage(
+        `Published ${json.metafieldsPublished} metafield(s) across ${json.productsConsidered} product(s).${failedNote}`
+      );
+    } catch (err) {
+      setPublishAllMessage(err.message);
+    } finally {
+      setPublishingAll(false);
+    }
+  }
+
   const markedCount = data.markedCount ?? 0;
 
   return (
@@ -113,6 +168,18 @@ export default function ProductList({ selectedId, onSelect, refreshKey, onSynced
           {syncing ? 'Syncing...' : 'Sync now'}
         </button>
       </div>
+      <div className="toolbar">
+        <button className="btn" onClick={handleAiTagAll} disabled={aiTaggingAll} style={{ width: '100%' }}>
+          {aiTaggingAll ? 'Tagging all with AI...' : 'Tag all with AI'}
+        </button>
+      </div>
+      {aiTagAllMessage && <div className="status-text">{aiTagAllMessage}</div>}
+      <div className="toolbar">
+        <button className="btn" onClick={handlePublishAll} disabled={publishingAll} style={{ width: '100%' }}>
+          {publishingAll ? 'Publishing all...' : 'Publish all to Shopify'}
+        </button>
+      </div>
+      {publishAllMessage && <div className="status-text">{publishAllMessage}</div>}
       {markedCount > 0 && (
         <div className="toolbar">
           <button className="btn btn-danger" onClick={handleBulkDelete} disabled={bulkDeleting} style={{ width: '100%' }}>

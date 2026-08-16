@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../lib/db.js';
-import { generateProductTags } from '../../../../../lib/aiTagger.js';
+import { applyAiTags } from '../../../../../lib/aiTagger.js';
 
 // The Claude vision call (plus fetching the product image) routinely takes
 // longer than Vercel's 10s default function timeout, which cuts the
@@ -28,28 +28,12 @@ export async function POST(request, { params }) {
       'SELECT key, label, sub_label, is_multi, max_tags, values FROM tag_categories ORDER BY key'
     );
 
-    let tagsByCategory;
+    let results;
     try {
-      tagsByCategory = await generateProductTags(productRows[0], categories);
+      results = await applyAiTags(query, productRows[0], categories, { force: true });
     } catch (err) {
       console.error('AI tag generation failed:', err);
       return NextResponse.json({ error: err.message }, { status: 502 });
-    }
-
-    const results = [];
-    for (const category of categories) {
-      const values = tagsByCategory[category.key] ?? [];
-      const { rows: upserted } = await query(
-        `INSERT INTO product_tags (product_id, category_key, values, tagged_by, updated_at)
-         VALUES ($1, $2, $3, 'AI', now())
-         ON CONFLICT (product_id, category_key) DO UPDATE SET
-           values = EXCLUDED.values,
-           tagged_by = EXCLUDED.tagged_by,
-           updated_at = now()
-         RETURNING category_key, values, tagged_by, updated_at`,
-        [id, category.key, values]
-      );
-      results.push(upserted[0]);
     }
 
     return NextResponse.json({ tags: results });

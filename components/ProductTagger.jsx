@@ -76,7 +76,13 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
     setAiTagError('');
     try {
       const res = await fetch(`/api/products/${encodedId}/ai-tag`, { method: 'POST' });
-      const json = await res.json();
+      const text = await res.text();
+      let json;
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`AI tagging failed (${res.status}): server returned a non-JSON response`);
+      }
       if (!res.ok) throw new Error(json.error || 'AI tagging failed');
 
       const byCategory = {};

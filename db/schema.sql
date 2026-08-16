@@ -15,6 +15,10 @@ CREATE TABLE IF NOT EXISTS products (
 -- already has the products table from before this column existed.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS marked_for_removal BOOLEAN NOT NULL DEFAULT false;
 
+-- Plain-text product description, pulled in alongside the title/image as
+-- context for AI tagging (lib/aiTagger.js) — not shown anywhere in the UI.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT;
+
 -- Category config (so new taxonomy values can be added without a migration)
 CREATE TABLE IF NOT EXISTS tag_categories (
   key TEXT PRIMARY KEY,               -- e.g. 'body_shape'
@@ -30,7 +34,7 @@ CREATE TABLE IF NOT EXISTS product_tags (
   product_id TEXT REFERENCES products(id) ON DELETE CASCADE,
   category_key TEXT REFERENCES tag_categories(key),
   values TEXT[] NOT NULL DEFAULT '{}',
-  tagged_by TEXT,                     -- 'Ipek' | 'Sino'
+  tagged_by TEXT,                     -- 'AI' (auto-tagged) | 'Sinem' (reviewed/edited by hand)
   updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (product_id, category_key)
 );

@@ -317,6 +317,25 @@ textarea {
   font-weight: var(--w-light);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cat-badge {
+  font-size: 9px;
+  font-weight: var(--w-light);
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: var(--pill-radius);
+  border: 1px solid var(--color-soft);
+  color: var(--color-mid);
+}
+
+.cat-badge-reviewed {
+  border-color: var(--color-black);
+  background: var(--color-black);
+  color: var(--color-white);
 }
 
 .category-block .cat-sub {

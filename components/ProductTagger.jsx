@@ -1,9 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import TaggedByToggle from './TaggedByToggle.jsx';
 import NotesField from './NotesField.jsx';
 import { toggleTagValue } from '../lib/tagLogic.js';
+
+// Tags are either AI-generated (tagged_by 'AI', pending review) or reviewed/
+// edited by hand — this is a single-reviewer tool, so any manual edit is
+// attributed to 'Sinem' rather than picking from a list of stylists.
+const REVIEWER = 'Sinem';
 
 export default function ProductTagger({ productId, categories, onCategoryValueAdded, onTagsChanged, onDeleted }) {
   // Shopify GIDs (e.g. gid://shopify/Product/123) contain literal "/" —
@@ -12,17 +16,20 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState(null);
   const [tagsByCategory, setTagsByCategory] = useState({});
+  const [taggedByCategory, setTaggedByCategory] = useState({});
   const [notes, setNotes] = useState('');
-  const [taggedBy, setTaggedBy] = useState('Ipek');
   const [publishStatus, setPublishStatus] = useState('');
   const [newValueDrafts, setNewValueDrafts] = useState({});
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [aiTagging, setAiTagging] = useState(false);
+  const [aiTagError, setAiTagError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setPublishStatus('');
+    setAiTagError('');
 
     fetch(`/api/products/${encodedId}`)
       .then((res) => res.json())
@@ -30,11 +37,13 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
         if (cancelled) return;
         setProduct(json.product);
         const byCategory = {};
+        const taggedBy = {};
         for (const row of json.tags) {
           byCategory[row.category_key] = row.values;
-          if (row.tagged_by) setTaggedBy(row.tagged_by);
+          taggedBy[row.category_key] = row.tagged_by;
         }
         setTagsByCategory(byCategory);
+        setTaggedByCategory(taggedBy);
         setNotes(json.notes?.notes ?? '');
       })
       .finally(() => {
@@ -52,13 +61,38 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
     if (next === current) return;
 
     setTagsByCategory((prev) => ({ ...prev, [category.key]: next }));
+    setTaggedByCategory((prev) => ({ ...prev, [category.key]: REVIEWER }));
 
     await fetch(`/api/products/${encodedId}/tags`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category_key: category.key, values: next, tagged_by: taggedBy }),
+      body: JSON.stringify({ category_key: category.key, values: next, tagged_by: REVIEWER }),
     });
     onTagsChanged?.();
+  }
+
+  async function handleAiTag() {
+    setAiTagging(true);
+    setAiTagError('');
+    try {
+      const res = await fetch(`/api/products/${encodedId}/ai-tag`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'AI tagging failed');
+
+      const byCategory = {};
+      const taggedBy = {};
+      for (const row of json.tags) {
+        byCategory[row.category_key] = row.values;
+        taggedBy[row.category_key] = row.tagged_by;
+      }
+      setTagsByCategory(byCategory);
+      setTaggedByCategory(taggedBy);
+      onTagsChanged?.();
+    } catch (err) {
+      setAiTagError(err.message);
+    } finally {
+      setAiTagging(false);
+    }
   }
 
   async function handleAddValue(category) {
@@ -127,15 +161,28 @@ export default function ProductTagger({ productId, categories, onCategoryValueAd
         </div>
       </div>
 
-      <TaggedByToggle value={taggedBy} onChange={setTaggedBy} />
+      <div style={{ marginBottom: 24 }}>
+        <button className="btn" onClick={handleAiTag} disabled={aiTagging} type="button">
+          {aiTagging ? 'Tagging with AI...' : 'Tag with AI'}
+        </button>
+        {aiTagError && <div className="status-text">{aiTagError}</div>}
+      </div>
 
       {categories.map((category) => {
         const selected = tagsByCategory[category.key] ?? [];
         const atCap = category.max_tags != null && selected.length >= category.max_tags;
+        const taggedBy = taggedByCategory[category.key];
 
         return (
           <div className="category-block" key={category.key}>
-            <div className="cat-label">{category.label}</div>
+            <div className="cat-label">
+              {category.label}
+              {taggedBy && (
+                <span className={`cat-badge${taggedBy === REVIEWER ? ' cat-badge-reviewed' : ''}`}>
+                  {taggedBy === REVIEWER ? 'Reviewed' : 'AI'}
+                </span>
+              )}
+            </div>
             {category.sub_label && <div className="cat-sub">{category.sub_label}</div>}
             <div className="chip-row">
               {category.values.map((value) => {

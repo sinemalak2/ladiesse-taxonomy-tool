@@ -12,6 +12,7 @@
     "migrate": "node scripts/migrate.js",
     "sync": "node scripts/sync-shopify.js",
     "ai-tag": "node scripts/ai-tag-products.js",
+    "publish-all": "node scripts/publish-to-shopify.js",
     "prune-removed": "node scripts/prune-removed-products.js",
     "prune-archived": "node scripts/prune-archived-products.js",
     "ingest-ga4": "node scripts/ingest-ga4.js",

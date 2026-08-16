@@ -12,65 +12,12 @@
 //                                values including ones already reviewed by
 //                                hand — use deliberately, not routinely
 import { getPool } from '../lib/db.js';
-import { generateProductTags } from '../lib/aiTagger.js';
+import { applyAiTags, findUntaggedProductIds } from '../lib/aiTagger.js';
 
 const CONCURRENCY = 3;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchUntaggedProductIds(pool, force) {
-  if (force) {
-    const { rows } = await pool.query('SELECT id FROM products ORDER BY title');
-    return rows.map((r) => r.id);
-  }
-
-  const { rows } = await pool.query(`
-    SELECT p.id
-    FROM products p
-    WHERE EXISTS (
-      SELECT 1 FROM product_tags pt
-      WHERE pt.product_id = p.id AND array_length(pt.values, 1) IS NULL
-    )
-    ORDER BY p.title
-  `);
-  return rows.map((r) => r.id);
-}
-
-async function tagOneProduct(pool, categories, id, force) {
-  const { rows: productRows } = await pool.query(
-    'SELECT id, title, description, image_url FROM products WHERE id = $1',
-    [id]
-  );
-  if (productRows.length === 0) return { id, status: 'skipped', reason: 'not found' };
-
-  const tagsByCategory = await generateProductTags(productRows[0], categories);
-
-  for (const category of categories) {
-    const values = tagsByCategory[category.key] ?? [];
-    if (!force) {
-      // Never clobber a category a human already reviewed, even in a
-      // --force-free bulk run that also happens to touch this product for
-      // another still-empty category.
-      const { rows: existing } = await pool.query(
-        'SELECT tagged_by FROM product_tags WHERE product_id = $1 AND category_key = $2',
-        [id, category.key]
-      );
-      if (existing[0]?.tagged_by === 'Sinem') continue;
-    }
-    await pool.query(
-      `INSERT INTO product_tags (product_id, category_key, values, tagged_by, updated_at)
-       VALUES ($1, $2, $3, 'AI', now())
-       ON CONFLICT (product_id, category_key) DO UPDATE SET
-         values = EXCLUDED.values,
-         tagged_by = EXCLUDED.tagged_by,
-         updated_at = now()`,
-      [id, category.key, values]
-    );
-  }
-
-  return { id, title: productRows[0].title, status: 'tagged' };
 }
 
 async function runWithConcurrency(items, limit, worker) {
@@ -91,6 +38,7 @@ async function runWithConcurrency(items, limit, worker) {
 async function main() {
   const force = process.argv.includes('--force');
   const pool = getPool();
+  const queryFn = (text, params) => pool.query(text, params);
 
   const { rows: categories } = await pool.query(
     'SELECT key, label, sub_label, is_multi, max_tags, values FROM tag_categories ORDER BY key'
@@ -100,7 +48,10 @@ async function main() {
     process.exit(1);
   }
 
-  const ids = await fetchUntaggedProductIds(pool, force);
+  const ids = force
+    ? (await pool.query('SELECT id FROM products ORDER BY title')).rows.map((r) => r.id)
+    : await findUntaggedProductIds(queryFn);
+
   if (ids.length === 0) {
     console.log('Nothing to tag — every product already has a full set of tags. Use --force to re-tag anyway.');
     await pool.end();
@@ -114,9 +65,13 @@ async function main() {
 
   await runWithConcurrency(ids, CONCURRENCY, async (id) => {
     try {
-      const result = await tagOneProduct(pool, categories, id, force);
+      const { rows: productRows } = await pool.query(
+        'SELECT id, title, description, image_url FROM products WHERE id = $1',
+        [id]
+      );
+      await applyAiTags(queryFn, productRows[0], categories, { force });
       done++;
-      console.log(`[${done + failed}/${ids.length}] ${result.title ?? id} — tagged`);
+      console.log(`[${done + failed}/${ids.length}] ${productRows[0].title} — tagged`);
     } catch (err) {
       failed++;
       console.error(`[${done + failed}/${ids.length}] ${id} — failed: ${err.message}`);

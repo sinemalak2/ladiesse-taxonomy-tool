@@ -115,6 +115,8 @@ POST /api/products/:id/mark-removal                   { marked }  — flag/unfla
 POST /api/products/:id/delete                         delete immediately, from Shopify and this DB
 POST /api/products/bulk-delete                        delete every product currently marked_for_removal
 POST /api/products/:id/ai-tag                          regenerate all of a product's tags via AI (tagged_by='AI')
+POST /api/products/ai-tag-batch                        tag the next batch of still-untagged products (used by "Tag all with AI")
+POST /api/products/publish-all-to-shopify               publish every tagged product's tags to Shopify in one pass
 ```
 
 ## AI tagging
@@ -127,31 +129,46 @@ to each category in the tagger shows which state it's in, so a review pass
 just means paging through products and looking for "AI" badges to confirm
 or fix.
 
-Two ways to run it:
+Three ways to run it:
 
-- **Bulk, once (or after a big catalog sync):** `npm run ai-tag` walks every
-  product missing at least one category's tags and AI-tags it in one pass
-  (title + description + photo → `lib/aiTagger.js` → Claude). Safe to
+- **Bulk, from the UI:** the sidebar's "Tag all with AI" button tags every
+  product missing at least one category's tags, five at a time per request
+  (`POST /api/products/ai-tag-batch`), looping automatically until nothing's
+  left — a full-catalog run stays inside Vercel's function timeout this way.
+  Progress shows live ("Tagged 40, 3 remaining..."). Safe to click again
+  later — already-tagged products are skipped.
+- **Bulk, from the CLI:** `npm run ai-tag` does the same walk in one long-
+  running process instead of small batched requests — useful for a very
+  large catalog or when you'd rather watch one continuous log. Safe to
   re-run — already-tagged products are skipped, and it never overwrites a
   category already marked `tagged_by='Sinem'`. `npm run ai-tag -- --force`
   re-tags everything, including reviewed rows — use deliberately.
 - **Per product, from the UI:** the "Tag with AI" button on a product's
   detail panel calls `POST /api/products/:id/ai-tag` to regenerate that one
-  product's tags. Unlike the bulk script this always overwrites, including
+  product's tags. Unlike the bulk options this always overwrites, including
   categories already reviewed — it's an explicit single-product action.
 
 Requires `ANTHROPIC_API_KEY` (see `.env.local.example`). Nothing is ever
-auto-published to Shopify from an AI tag — that's still a manual "Publish to
-Shopify" click per product after review, same as before.
+auto-published to Shopify from an AI tag — publishing is still a separate
+step (see below), so there's always a chance to review before it goes live.
 
 ## Publishing tags to Shopify
 
-`POST /api/products/:id/publish-to-shopify` writes each non-empty tag
-category as a `list.single_line_text_field` metafield under the
-`ladiesse_taxonomy` namespace (keys: `body_shape`, `occasion`, `vibe`,
-`skin_tone`), so the storefront/AI search layer can read tags without
-querying this Postgres database directly. This is one-way (DB → Shopify),
-triggered manually per product from the tagging UI.
+`POST /api/products/:id/publish-to-shopify` (the tagging UI's "Publish to
+Shopify" button) writes one product's non-empty tag categories as
+`list.single_line_text_field` metafields under the `ladiesse_taxonomy`
+namespace (keys: `body_shape`, `occasion`, `vibe`, `skin_tone`), so the
+storefront/AI search layer can read tags without querying this Postgres
+database directly. This is one-way (DB → Shopify).
+
+For pushing everything at once instead of product-by-product, the sidebar's
+**"Publish all to Shopify"** button (confirmed via a dialog first, since
+it's a live write to the storefront) or `npm run publish-all` from the CLI
+both publish every product that has at least one tagged category,
+regardless of whether it's been reviewed yet — same `lib/shopifyPublish.js`
+logic either way, batching Shopify's `metafieldsSet` calls 25 metafields at
+a time. Re-publishing later after editing tags is safe — it just overwrites
+the metafield values.
 
 ## Removing products
 

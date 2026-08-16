@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTaggingPrompt, parseAiTagResponse } from '../lib/aiTagger.js';
+import { buildTaggingPrompt, parseAiTagResponse, retryDelayMs } from '../lib/aiTagger.js';
 
 const categories = [
   { key: 'body_shape', label: 'Body Shape', is_multi: true, max_tags: null, values: ['Hourglass', 'Pear'] },
@@ -73,5 +73,25 @@ describe('parseAiTagResponse', () => {
 
   test('throws when no JSON object is present', () => {
     assert.throws(() => parseAiTagResponse('no json here', categories));
+  });
+});
+
+describe('retryDelayMs', () => {
+  const noHeaderResponse = { headers: { get: () => null } };
+
+  test('backs off exponentially when no Retry-After header is present', () => {
+    assert.equal(retryDelayMs(noHeaderResponse, 1), 1000);
+    assert.equal(retryDelayMs(noHeaderResponse, 2), 2000);
+    assert.equal(retryDelayMs(noHeaderResponse, 3), 4000);
+  });
+
+  test('honors a Retry-After header when present', () => {
+    const response = { headers: { get: () => '5' } };
+    assert.equal(retryDelayMs(response, 1), 5000);
+  });
+
+  test('ignores an invalid Retry-After header and falls back to backoff', () => {
+    const response = { headers: { get: () => 'not-a-number' } };
+    assert.equal(retryDelayMs(response, 1), 1000);
   });
 });
